@@ -37,7 +37,7 @@ remover:
 
 # RabbitMQ configuration
 rabbitmq:
-  url: amqp://admin:admin@47.96.106.87:5672
+  url: amqp://guest:guest@rabbitmq:5672
   # Connection settings
   heartbeat: 10s
   connection-timeout: 30s
