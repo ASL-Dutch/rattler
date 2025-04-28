@@ -1,11 +1,13 @@
 package config
 
 import (
-	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
-	log "github.com/sirupsen/logrus"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
+
+	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
+	log "github.com/sirupsen/logrus"
 )
 
 // InitLog Initialize log settings
@@ -25,7 +27,16 @@ func InitLog(logFilename string, lev string) {
 		rotatelogs.WithRotationCount(15),
 		rotatelogs.WithRotationTime(time.Duration(24)*time.Hour))
 
-	log.SetOutput(writer)
+	// 设置日志同时输出到终端和文件
+	mw := io.MultiWriter(os.Stdout, writer)
+	log.SetOutput(mw)
+
+	// 设置格式化器，使日期更易读
+	log.SetFormatter(&log.TextFormatter{
+		FullTimestamp:   true,                      // 显示完整时间戳
+		TimestampFormat: "2006-01-02 15:04:05.000", // 更易读的时间格式
+		DisableQuote:    true,                      // 不给字段值加引号
+	})
 
 	level, err := log.ParseLevel(lev)
 	if err == nil {

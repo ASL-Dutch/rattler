@@ -1,6 +1,5 @@
 /*
 Copyright © 2022 Joker
-
 */
 package main
 
@@ -10,7 +9,6 @@ import (
 )
 
 func init() {
-	log.SetFormatter(&log.TextFormatter{})
 	log.SetLevel(log.InfoLevel)
 }
 

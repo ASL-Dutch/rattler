@@ -6,35 +6,54 @@ log:
   level: debug
   directory: out/log/
 
-# ser-dir: used to download tax bills and export files. The export is the backup directory
+# The saving path of tax bills and export files
 ser-dir:
   nl:
-    tax-bill:
-    export:
+    tax-bill: out/pdf/nl
+    export: out/backup/nl
   be:
-    tax-bill:
-    export:
+    tax-bill: out/pdf/be
+    export: out/backup/be
 
-# Import XML save directory. softpak save the import xml file to xml-dir
+# Import XML save directory
 import:
-  xml-dir:
+  xml-dir: out/import-20250428
 
-# Export XML file listening path.
-# softpak send the export xml file to watch-dir, ASL backup the export xml file to backup-dir
+# Export XML file listening path
 watcher:
   nl:
-    watch-dir:
-    backup-dir:
+    watch-dir: out/watch/nl
+    backup-dir: out/backup/nl
   be:
-    watch-dir:
-    backup-dir:
+    watch-dir: out/watch/be
+    backup-dir: out/backup/be
 
+# Temporary path
+tmp-dir: out/tmp
+
+# Queue size for file remover
+remover:
+  queue_size: 200
 
 # RabbitMQ configuration
 rabbitmq:
-  url: 'amqp://USER:PASSWORD@HOST:5672'
+  url: amqp://admin:admin@47.96.106.87:5672
+  # Connection settings
+  heartbeat: 10s
+  connection-timeout: 30s
+  # Connection pool settings
+  max-connections: 3
+  max-channels-per-conn: 10
+  # Auto recovery settings
+  auto-reconnect: true
+  reconnect-interval: 5s
+  # Consumer settings
+  prefetch-count: 1
+  auto-ack: false
   # Import xml queue
   import:
+    # consumer_name
+    consumer: asl_import_xml_consumer_dev
     exchange: softpak.import.topic
     exchange-type: topic
     queue: softpak.import
@@ -42,5 +61,5 @@ rabbitmq:
   export:
     exchange: softpak.export.topic
     exchange-type: topic
-    # softpak.export.be / softpak.export.nl
+    # queue prefix: softpak.export.be / softpak.export.nl
     queue: softpak.export

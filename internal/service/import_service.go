@@ -1,17 +1,16 @@
 // Package service 报关文件import xml 服务类
-
 package service
 
 import (
 	"encoding/json"
 	"fmt"
-	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
-	"sysafari.com/softpak/rattler/util"
+
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
+	"sysafari.com/softpak/rattler/internal/util"
 )
 
 // ImportDocument Import xml document request param
@@ -20,7 +19,7 @@ type ImportDocument struct {
 	Document string `json:"document"`
 }
 
-// SaveImportDocument saves the import xml document
+// SaveImportDocument 保存import XML文档
 func SaveImportDocument(message string) {
 	// 去除转义符
 	msg, err := strconv.Unquote(message)
@@ -32,8 +31,8 @@ func SaveImportDocument(message string) {
 	}
 
 	if err != nil {
-		log.Errorf("Unmarshal queue message, err: %v", err)
-		fmt.Println("Unmarshal queue message, err: ", err)
+		log.Errorf("解析队列消息失败: %v", err)
+		fmt.Println("解析队列消息失败: ", err)
 		return
 	}
 
@@ -41,18 +40,25 @@ func SaveImportDocument(message string) {
 	document := doc.Document
 	importDir := viper.GetString("import.xml-dir")
 
-	canSave := util.IsDir(importDir) || util.CreateDir(importDir)
-	if !canSave {
-		log.Errorf("Import directory %s not exists, dont save import xml document", importDir)
+	// 确保导入目录存在
+	if importDir == "" {
+		log.Errorf("导入目录配置为空")
 		return
 	}
 
-	fp := filepath.Join(importDir, filename)
-	err = ioutil.WriteFile(fp, []byte(document), os.ModePerm)
-	if err != nil {
-		log.Errorf("Write file %s error: %v", fp, err)
-	} else {
-		log.Infof("Write file %s ok", fp)
+	// 创建目录（如果不存在）
+	canSave := util.IsDir(importDir) || util.CreateDir(importDir)
+	if !canSave {
+		log.Errorf("导入目录 %s 不存在且无法创建，无法保存导入XML文件", importDir)
+		return
 	}
 
+	// 写入文件
+	fp := filepath.Join(importDir, filename)
+	err = os.WriteFile(fp, []byte(document), os.ModePerm)
+	if err != nil {
+		log.Errorf("写入文件 %s 失败: %v", fp, err)
+	} else {
+		log.Infof("成功写入文件: %s", fp)
+	}
 }

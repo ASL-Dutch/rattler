@@ -2,12 +2,13 @@ package service
 
 import (
 	"fmt"
-	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"path/filepath"
 	"strings"
-	"sysafari.com/softpak/rattler/model"
-	"sysafari.com/softpak/rattler/util"
+
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
+	"sysafari.com/softpak/rattler/internal/model"
+	"sysafari.com/softpak/rattler/internal/util"
 )
 
 // SearchFile Search softpak file

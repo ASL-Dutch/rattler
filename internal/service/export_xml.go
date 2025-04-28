@@ -5,15 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"os"
 	"path/filepath"
 	"strings"
-	rabbit2 "sysafari.com/softpak/rattler/dao/rabbit"
-	"sysafari.com/softpak/rattler/model"
-	"sysafari.com/softpak/rattler/util"
 	"time"
+
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
+	"sysafari.com/softpak/rattler/internal/model"
+	"sysafari.com/softpak/rattler/internal/rabbit"
+	"sysafari.com/softpak/rattler/internal/util"
 )
 
 // 报关结果放行文件服务类
@@ -40,13 +41,36 @@ type ExportXmlInfo struct {
 func SendExportXml(filename string, declareCountry string) {
 	log.Infof("Declare country: %s export xml: %s reading ", declareCountry, filename)
 
-	content, err := os.ReadFile(filename)
+	// 优先使用文件级别压缩
+	compressedXml, err := util.CompressXMLFile(filename)
 	if err != nil {
-		log.Error("Read XML file error:", err)
-	}
-	contentStr := string(content)
+		log.Warnf("文件级压缩失败，尝试使用常规方法: %v", err)
 
-	log.Debugf("Min size xml content:  %s ", contentStr)
+		// 如果文件级压缩失败，回退到常规方法
+		content, err := os.ReadFile(filename)
+		if err != nil {
+			log.Error("Read XML file error:", err)
+			return
+		}
+		compressedXml = util.AdvancedCompressXML(string(content))
+	}
+
+	// 获取原始文件大小用于对比
+	fileInfo, err := os.Stat(filename)
+	if err == nil {
+		originalSize := fileInfo.Size()
+		compressedSize := int64(len(compressedXml))
+
+		// 记录压缩前后的大小差异
+		if originalSize > compressedSize {
+			log.Infof("XML压缩: 原始大小 %d 字节, 压缩后 %d 字节, 减少了 %.2f%%",
+				originalSize, compressedSize, float64(originalSize-compressedSize)*100/float64(originalSize))
+		} else {
+			log.Debugf("XML压缩: 无效果或增加了大小")
+		}
+	}
+
+	log.Debugf("Min size xml content:  %s ", compressedXml)
 
 	// backup export xml
 	fn, err := moveFileToBackup(filename, declareCountry)
@@ -58,7 +82,7 @@ func SendExportXml(filename string, declareCountry string) {
 	xmlContent := ExportXmlInfo{
 		FileName:       fn,
 		DeclareCountry: declareCountry,
-		Content:        contentStr,
+		Content:        compressedXml,
 	}
 	// Serialize to JSON
 	bf := bytes.NewBuffer([]byte{})
@@ -73,25 +97,30 @@ func SendExportXml(filename string, declareCountry string) {
 		// Send xml info to MQ
 		publishMessageToMQ(bf.String(), declareCountry)
 	}
-
 }
 
 // publishMessageToMQ publishes the message to MQ
 func publishMessageToMQ(message string, declareCountry string) {
+	// Get all the required config parameters
 	qPrefix := viper.GetString("rabbitmq.export.queue")
-
-	//seq := strconv.Itoa(jobNumber % queueCount)
-	//fmt.Println(seq)
 	var queueName = strings.ToLower(qPrefix + "." + declareCountry)
 
-	rbmq := &rabbit2.Rabbit{
-		Url:          viper.GetString("rabbitmq.url"),
-		Exchange:     viper.GetString("rabbitmq.export.exchange"),
-		ExchangeType: viper.GetString("rabbitmq.export.exchange-type"),
-		Queue:        queueName,
+	exchange := viper.GetString("rabbitmq.export.exchange")
+
+	// 获取RabbitMQ管理器实例
+	manager, err := rabbit.GetInstance()
+	if err != nil {
+		log.Errorf("Failed to get RabbitMQ manager: %v", err)
+		return
 	}
 
-	rabbit2.Publish(rbmq, message)
+	// 使用管理器发布消息
+	err = manager.PublishMessage(exchange, queueName, message)
+	if err != nil {
+		log.Errorf("Failed to publish message to queue %s: %v", queueName, err)
+	} else {
+		log.Infof("Successfully published message to queue %s", queueName)
+	}
 }
 
 // moveFileToBackup Move file to back up location
@@ -118,7 +147,7 @@ func moveFileToBackup(fp string, dc string) (string, error) {
 	canMove := util.IsDir(bacdir) || util.CreateDir(bacdir)
 	if !canMove {
 		log.Errorf("Cannot create backup dir %s , dont move file %s", bacdir, fp)
-		return "", errors.New(fmt.Sprintf("Cannot create backup dir %s , dont move file %s", bacdir, fp))
+		return "", fmt.Errorf("cannot create backup dir %s , dont move file %s", bacdir, fp)
 	}
 	filename := filepath.Base(fp)
 	targetFilename := filepath.Join(bacdir, newFileName)
@@ -134,10 +163,10 @@ func moveFileToBackup(fp string, dc string) (string, error) {
 // ExportListenDicFiles 获取申报国家Export 监听路径下的文件列表
 func ExportListenDicFiles(dc string) (files []model.ExportFileListDTO, err error) {
 	var listenDir string
-	if "NL" == dc {
+	if dc == "NL" {
 		listenDir = viper.GetString("watcher.nl.watch-dir")
 	}
-	if "BE" == dc {
+	if dc == "BE" {
 		listenDir = viper.GetString("watcher.be.watch-dir")
 	}
 	fmt.Println("listenDir", listenDir)
