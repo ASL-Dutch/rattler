@@ -8,7 +8,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
+	"sysafari.com/softpak/rattler/internal/config"
 	"sysafari.com/softpak/rattler/internal/util"
 )
 
@@ -27,9 +27,6 @@ import (
 // @Failure      500
 // @Router       /download/pdf/{origin}/{target} [get]
 func DownloadTaxPdf(c echo.Context) error {
-	nlTaxDir := viper.GetString("ser-dir.nl.tax-bill")
-	beTaxDir := viper.GetString("ser-dir.be.tax-bill")
-
 	origin := c.Param("origin") + ".pdf"
 	target := c.Param("target")
 	if !strings.Contains(target, ".pdf") {
@@ -37,14 +34,19 @@ func DownloadTaxPdf(c echo.Context) error {
 	}
 
 	dc := strings.ToUpper(c.QueryParam("dc"))
-
-	var filePath string
-	// dc 为空则为nl
-	if dc == "BE" {
-		filePath = filepath.Join(beTaxDir, origin)
-	} else {
-		filePath = filepath.Join(nlTaxDir, origin)
+	if dc == "" {
+		dc = "NL" // 默认为NL
 	}
+
+	// 使用配置对象获取路径
+	var filePath string
+	taxBillDir := config.GlobalConfig.GetTaxBillDir(dc)
+	if taxBillDir == "" {
+		return c.String(http.StatusNotFound,
+			fmt.Sprintf("未配置申报国家 %s 的税单目录", dc))
+	}
+
+	filePath = filepath.Join(taxBillDir, origin)
 
 	if util.IsExists(filePath) {
 		return c.Attachment(filePath, target)
@@ -71,27 +73,29 @@ func DownloadTaxPdf(c echo.Context) error {
 // @Failure      500
 // @Router       /download/xml/{dc}/{filename} [get]
 func DownloadExportXml(c echo.Context) error {
-	nlExportDir := viper.GetString("ser-dir.nl.export")
-	beExportDir := viper.GetString("ser-dir.be.export")
-
 	dc := strings.ToUpper(c.Param("dc"))
 	filename := c.Param("filename")
-
-	year := filename[0:4]
-	month := filename[4:6]
-
 	needDownload := c.QueryParam("download")
 
-	var filePath string
-	if dc == "NL" {
-		filePath = filepath.Join(nlExportDir, year, month, filename)
-	} else if dc == "BE" {
-		filePath = filepath.Join(beExportDir, filename)
-	} else {
-		return c.String(http.StatusNotFound, fmt.Sprintf("%s is not a valid declare country", dc))
+	// 使用配置对象获取路径
+	exportDir := config.GlobalConfig.GetExportDir(dc)
+	if exportDir == "" {
+		return c.String(http.StatusNotFound,
+			fmt.Sprintf("%s is not a valid declare country or export directory not configured", dc))
 	}
 
-	fmt.Println("download filePath:", filePath)
+	// 解析文件名中的年月
+	var filePath string
+	if len(filename) >= 6 {
+		year := filename[0:4]
+		month := filename[4:6]
+		filePath = filepath.Join(exportDir, year, month, filename)
+	} else {
+		// 对于不符合格式的文件名，直接在导出目录下查找
+		filePath = filepath.Join(exportDir, filename)
+	}
+
+	log.Debugf("Download export XML file path: %s", filePath)
 	if util.IsExists(filePath) {
 		if needDownload == "1" {
 			return c.Attachment(filePath, filename)
@@ -99,7 +103,6 @@ func DownloadExportXml(c echo.Context) error {
 		return c.File(filePath)
 	}
 
-	log.Errorf("Download export xl failed,%s is not found.", filePath)
-
+	log.Errorf("Download export XML failed, %s is not found.", filePath)
 	return c.String(http.StatusNoContent, fmt.Sprintf("The file %s is not found", filename))
 }

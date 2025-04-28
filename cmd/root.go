@@ -30,6 +30,11 @@ For example:`,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	Run: func(cmd *cobra.Command, args []string) {
+		// Initialize global configuration
+		if err := config.InitConfig(); err != nil {
+			log.Fatalf("Failed to initialize configuration: %v", err)
+		}
+
 		// Initialize RabbitMQ
 		if err := InitRabbitMQ(); err != nil {
 			log.Fatalf("Failed to initialize RabbitMQ: %v", err)
@@ -43,12 +48,14 @@ For example:`,
 		// Setup graceful shutdown
 		setupGracefulShutdown()
 
-		// async start listen export xml directory(NL | BE)
-		go ListenExportXML("NL")
-		go ListenExportXML("BE")
+		// 开启Export XML文件监听
+		StartWatchExportXmlDirWorker()
 
-		// start remover to resend export xml
-		go RemoverWork()
+		// 开启文件移动处理
+		// 考虑到：
+		// 1. 文件移动属于文件系统操作，可能在系统繁忙时，文件移动处理会阻塞，因此考虑异步处理
+		// 2. 也就是所有涉及到文件系统中文件修改路径的操作，都应该放入此队列中交由异步队列处理
+		StartMoveFileWorker()
 
 		// start file server
 		web.StartServer()
@@ -121,14 +128,21 @@ func initConfig() {
 	}
 
 	initLog()
-
 }
 
 func initLog() {
 	path, _ := os.Executable()
 	_, exec := filepath.Split(path)
 	logFile := exec + ".log"
-	logFilePath := filepath.Join(viper.GetString("log.directory"), logFile)
+
+	// Use the config package global initialization function
+	// The actual initialization will happen in InitConfig() in the Run function
+	// This is just to ensure logging is set up early if needed before full config initialization
+	logDir := viper.GetString("log.directory")
+	if logDir == "" {
+		logDir = "out/log/"
+	}
+	logFilePath := filepath.Join(logDir, logFile)
 
 	config.InitLog(logFilePath, viper.GetString("log.level"))
 }

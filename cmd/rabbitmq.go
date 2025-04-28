@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
+	"sysafari.com/softpak/rattler/internal/config"
 	"sysafari.com/softpak/rattler/internal/rabbit"
 	"sysafari.com/softpak/rattler/internal/service"
 )
@@ -21,74 +21,84 @@ var (
 	initOnce sync.Once
 )
 
-// getRabbitConfig 从viper配置中构建RabbitMQ管理器配置
+// getRabbitConfig 从配置对象中构建RabbitMQ管理器配置
 func getRabbitConfig() *rabbit.ManagerConfig {
-	config := &rabbit.ManagerConfig{
+	// 使用全局配置对象
+	rabbitConfig := config.GlobalConfig.RabbitMQ
+
+	managerConfig := &rabbit.ManagerConfig{
 		// 连接配置
-		URL:                viper.GetString("rabbitmq.url"),
-		Heartbeat:          viper.GetString("rabbitmq.heartbeat"),
-		ConnectionTimeout:  viper.GetString("rabbitmq.connection-timeout"),
-		MaxConnections:     viper.GetInt("rabbitmq.max-connections"),
-		MaxChannelsPerConn: viper.GetInt("rabbitmq.max-channels-per-conn"),
-		AutoReconnect:      viper.GetBool("rabbitmq.auto-reconnect"),
-		ReconnectInterval:  viper.GetString("rabbitmq.reconnect-interval"),
-		PrefetchCount:      viper.GetInt("rabbitmq.prefetch-count"),
-		AutoAck:            viper.GetBool("rabbitmq.auto-ack"),
+		URL:                rabbitConfig.URL,
+		Heartbeat:          rabbitConfig.Heartbeat,
+		ConnectionTimeout:  rabbitConfig.ConnectionTimeout,
+		MaxConnections:     rabbitConfig.MaxConnections,
+		MaxChannelsPerConn: rabbitConfig.MaxChannelsPerConn,
+		AutoReconnect:      rabbitConfig.AutoReconnect,
+		ReconnectInterval:  rabbitConfig.ReconnectInterval,
+		PrefetchCount:      rabbitConfig.PrefetchCount,
+		AutoAck:            rabbitConfig.AutoAck,
 
 		// 导出服务配置
-		ExportExchange:     viper.GetString("rabbitmq.export.exchange"),
-		ExportExchangeType: viper.GetString("rabbitmq.export.exchange-type"),
-		ExportQueuePrefix:  viper.GetString("rabbitmq.export.queue"),
+		ExportExchange:     rabbitConfig.Export.Exchange,
+		ExportExchangeType: rabbitConfig.Export.ExchangeType,
+		ExportQueuePrefix:  rabbitConfig.Export.Queue,
 	}
 
-	return config
+	return managerConfig
 }
 
 // InitRabbitMQ 初始化RabbitMQ客户端
 func InitRabbitMQ() error {
-	var initErr error
+	var err error
 
+	// 使用sync.Once确保只初始化一次
 	initOnce.Do(func() {
-		log.Info("Initializing RabbitMQ...")
-
-		// 获取配置
-		config := getRabbitConfig()
+		// 创建可取消的上下文
+		rabbitCtx, rabbitCancel = context.WithCancel(context.Background())
 
 		// 初始化RabbitMQ管理器
-		initErr = rabbit.InitializeManager(config)
-		if initErr != nil {
-			log.Errorf("Failed to initialize RabbitMQ manager: %v", initErr)
+		err = rabbit.InitializeWithConfig(getRabbitConfig())
+		if err != nil {
+			log.Errorf("Failed to initialize RabbitMQ manager: %v", err)
 			return
 		}
 
-		// 创建用于管理消费者的全局上下文
-		rabbitCtx, rabbitCancel = context.WithCancel(context.Background())
-
-		log.Info("RabbitMQ initialized successfully")
+		log.Info("RabbitMQ manager initialized successfully")
 	})
 
-	return initErr
+	return err
 }
 
-// GetRabbitClient 获取RabbitMQ客户端实例
-// 此方法保留用于向后兼容
-func GetRabbitClient() (*rabbit.Client, error) {
-	// 确保管理器已初始化
-	if err := InitRabbitMQ(); err != nil {
-		return nil, err
+// CloseRabbitMQ 安全关闭所有RabbitMQ连接
+func CloseRabbitMQ() {
+	// 取消上下文，通知所有消费者停止
+	if rabbitCancel != nil {
+		rabbitCancel()
 	}
 
-	// 获取管理器实例
+	// 等待所有消费者完成
+	consumerWg.Wait()
+
+	// 关闭RabbitMQ管理器
 	manager, err := rabbit.GetInstance()
-	if err != nil {
-		return nil, err
+	if err == nil && manager != nil {
+		manager.Close()
 	}
 
-	// 返回底层客户端
-	return manager.GetClient(), nil
+	log.Info("RabbitMQ connections closed")
 }
 
-// StartImportXmlConsumer 启动导入XML消息的消费者
+// StartMessageQueueConsumers 启动所有消息队列消费者
+func StartMessageQueueConsumers() error {
+	// 启动导入XML消费者
+	if err := StartImportXmlConsumer(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// StartImportXmlConsumer 启动导入XML消费者
 func StartImportXmlConsumer() error {
 	// 确保管理器已初始化
 	if err := InitRabbitMQ(); err != nil {
@@ -105,8 +115,9 @@ func StartImportXmlConsumer() error {
 	client := manager.GetClient()
 
 	// 获取队列配置
-	exchangeName := viper.GetString("rabbitmq.import.exchange")
-	exchangeType := viper.GetString("rabbitmq.import.exchange-type")
+	rabbitConfig := config.GlobalConfig.RabbitMQ
+	exchangeName := rabbitConfig.Import.Exchange
+	exchangeType := rabbitConfig.Import.ExchangeType
 	if exchangeType == "" {
 		exchangeType = "direct"
 	}
@@ -126,7 +137,7 @@ func StartImportXmlConsumer() error {
 	}
 
 	// 获取队列名称
-	queueName := viper.GetString("rabbitmq.import.queue")
+	queueName := rabbitConfig.Import.Queue
 	if queueName == "" {
 		return errors.New("import xml queue name is empty")
 	}
@@ -153,7 +164,7 @@ func StartImportXmlConsumer() error {
 	}
 
 	// 创建消费者
-	consumerName := viper.GetString("rabbitmq.import.consumer")
+	consumerName := rabbitConfig.Import.Consumer
 	if consumerName == "" {
 		consumerName = "softpak_import_xml_consumer"
 	}
@@ -168,65 +179,23 @@ func StartImportXmlConsumer() error {
 	// 在goroutine中启动消费
 	go func() {
 		defer consumerWg.Done()
+		log.Infof("Import XML consumer started: %s", consumerName)
 
-		// 定义消息处理函数
-		messageHandler := func(ctx context.Context, body []byte) error {
-			log.Infof("Received message: %s", string(body))
-			// 处理导入XML文件
-			service.SaveImportDocument(string(body))
+		// 定义消息处理函数 - 根据 ConsumeWithContext 接口定义匹配参数类型
+		messageHandler := func(ctx context.Context, msg []byte) error {
+			log.Infof("Received import XML message")
+
+			// 处理消息内容 - SaveImportDocument不返回值，所以这里不需要处理返回值
+			service.SaveImportDocument(string(msg))
+
+			// 消息处理成功
 			return nil
 		}
 
 		// 开始消费
-		log.Infof("Starting consumer for queue: %s", queueName)
 		consumer.ConsumeWithContext(rabbitCtx, messageHandler)
-		log.Infof("Consumer stopped for queue: %s", queueName)
+		log.Infof("Import XML consumer stopped")
 	}()
 
 	return nil
-}
-
-// StartMessageQueueConsumers 初始化并启动所有RabbitMQ消费者
-func StartMessageQueueConsumers() error {
-	// 确保RabbitMQ已初始化
-	if err := InitRabbitMQ(); err != nil {
-		return err
-	}
-
-	// 启动导入XML消费者
-	if err := StartImportXmlConsumer(); err != nil {
-		log.Errorf("Failed to start import xml consumer: %v", err)
-		return err
-	}
-
-	// 如有需要，在此添加其他消费者
-	// 例如: StartOtherConsumer()
-
-	return nil
-}
-
-// StopMessageQueueConsumers 优雅地停止所有消费者
-func StopMessageQueueConsumers() {
-	if rabbitCancel != nil {
-		log.Info("Stopping all RabbitMQ consumers...")
-		rabbitCancel()
-
-		// 等待所有消费者停止
-		consumerWg.Wait()
-		log.Info("All RabbitMQ consumers stopped")
-	}
-}
-
-// CloseRabbitMQ 关闭RabbitMQ客户端连接并释放资源
-func CloseRabbitMQ() {
-	// 首先停止所有消费者
-	StopMessageQueueConsumers()
-
-	// 关闭RabbitMQ管理器
-	err := rabbit.ShutdownManager()
-	if err != nil {
-		log.Errorf("Error closing RabbitMQ manager: %v", err)
-	} else {
-		log.Info("RabbitMQ manager closed successfully")
-	}
 }

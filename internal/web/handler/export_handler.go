@@ -8,7 +8,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"sysafari.com/softpak/rattler/internal/model"
 	"sysafari.com/softpak/rattler/internal/service"
-	"sysafari.com/softpak/rattler/internal/util"
 )
 
 // ExportListenFiles 获取Export监听路径下当前文件列表
@@ -29,8 +28,8 @@ func ExportListenFiles(c echo.Context) (err error) {
 
 	data, err := service.ExportListenDicFiles(dc)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, &util.ResponseError{
-			Status: util.FAIL,
+		return c.JSON(http.StatusBadRequest, &model.ResponseError{
+			Status: model.FAIL,
 			Errors: []string{
 				err.Error(),
 			},
@@ -70,17 +69,17 @@ func ExportFileResend(c echo.Context) (err error) {
 		errs = append(errs, err.Error())
 	}
 	if len(errs) > 0 {
-		return c.JSON(http.StatusBadRequest, &util.ResponseError{
-			Status: util.FAIL,
+		return c.JSON(http.StatusBadRequest, &model.ResponseError{
+			Status: model.FAIL,
 			Errors: errs,
 		})
 	}
 
-	errs = service.ResendExport(dc, sfd)
+	errs = service.ResendExportFile(sfd.Files, dc, sfd.InWatchPath, sfd.CustomPath)
 
 	// success
-	return c.JSON(http.StatusOK, &util.ResponseError{
-		Status: util.SUCCESS,
+	return c.JSON(http.StatusOK, &model.ResponseError{
+		Status: model.SUCCESS,
 		Errors: errs,
 	})
 }

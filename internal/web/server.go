@@ -4,8 +4,8 @@ import (
 	"github.com/go-playground/validator"
 	"github.com/labstack/echo/v4"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	echoSwagger "github.com/swaggo/echo-swagger"
+	"sysafari.com/softpak/rattler/internal/config"
 	"sysafari.com/softpak/rattler/internal/model"
 	"sysafari.com/softpak/rattler/internal/web/handler"
 )
@@ -30,10 +30,7 @@ func StartServer() {
 	registerRoutes(e)
 
 	// Start server
-	port := viper.GetString("port")
-	if port == "" {
-		port = "1324"
-	}
+	port := config.GlobalConfig.GetPort()
 
 	log.Infof("Rattler server started on port %s", port)
 	log.Error(e.Start(":" + port))

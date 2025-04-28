@@ -11,7 +11,7 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
+	"sysafari.com/softpak/rattler/internal/config"
 	"sysafari.com/softpak/rattler/internal/model"
 	"sysafari.com/softpak/rattler/internal/rabbit"
 	"sysafari.com/softpak/rattler/internal/util"
@@ -101,11 +101,11 @@ func SendExportXml(filename string, declareCountry string) {
 
 // publishMessageToMQ publishes the message to MQ
 func publishMessageToMQ(message string, declareCountry string) {
-	// Get all the required config parameters
-	qPrefix := viper.GetString("rabbitmq.export.queue")
+	// 从全局配置获取参数
+	qPrefix := config.GlobalConfig.RabbitMQ.Export.Queue
 	var queueName = strings.ToLower(qPrefix + "." + declareCountry)
 
-	exchange := viper.GetString("rabbitmq.export.exchange")
+	exchange := config.GlobalConfig.RabbitMQ.Export.Exchange
 
 	// 获取RabbitMQ管理器实例
 	manager, err := rabbit.GetInstance()
@@ -127,49 +127,49 @@ func publishMessageToMQ(message string, declareCountry string) {
 func moveFileToBackup(fp string, dc string) (string, error) {
 	fn := filepath.Base(fp)
 
+	var year, month, newFileName string
+
 	firstPt := strings.Split(fn, "_")[0]
 	parse, err := time.Parse("200601", firstPt)
-	var year, month, newFileName string
 	if err != nil {
 		year = time.Now().Format("2006")
 		month = time.Now().Format("01")
 		newFileName = fmt.Sprintf("%s%s_%s", year, month, fn)
 	} else {
-		log.Warnf("The file:%s within date ,backup is origin filename.", fn)
+		log.Warnf("文件:%s 在路径 %s 下, 备份是原始文件名.", fn, parse.Format("2006-01-02"))
 		year = parse.Format("2006")
 		month = parse.Format("01")
 		newFileName = fn
 	}
 
-	backupDir := viper.GetString(fmt.Sprintf("watcher.%s.backup-dir", strings.ToLower(dc)))
-	bacdir := filepath.Join(backupDir, year, month)
-	// backup directory not exists create it
-	canMove := util.IsDir(bacdir) || util.CreateDir(bacdir)
-	if !canMove {
-		log.Errorf("Cannot create backup dir %s , dont move file %s", bacdir, fp)
-		return "", fmt.Errorf("cannot create backup dir %s , dont move file %s", bacdir, fp)
+	// 从全局配置获取备份目录
+	backupDir := config.GlobalConfig.GetExportBackupDir(dc)
+	if backupDir == "" {
+		log.Errorf("申报国家 %s 的备份目录未配置", dc)
+		return "", fmt.Errorf("申报国家 %s 的备份目录未配置", dc)
 	}
-	filename := filepath.Base(fp)
-	targetFilename := filepath.Join(bacdir, newFileName)
 
-	err = os.Rename(fp, targetFilename)
-	if err != nil {
-		log.Errorf("Backup export file %s failed, error: %v", filename, err)
-		return "", err
+	bacdir := filepath.Join(backupDir, year, month)
+
+	fileMoverParam := model.FileMoverParam{
+		SourceFile: fp,
+		MoveTo:     filepath.Join(bacdir, newFileName),
 	}
+
+	config.PublishFileMover(fileMoverParam)
+
 	return newFileName, nil
 }
 
 // ExportListenDicFiles 获取申报国家Export 监听路径下的文件列表
 func ExportListenDicFiles(dc string) (files []model.ExportFileListDTO, err error) {
-	var listenDir string
-	if dc == "NL" {
-		listenDir = viper.GetString("watcher.nl.watch-dir")
+	// 从全局配置获取监听目录
+	listenDir := config.GlobalConfig.GetExportWatchDir(dc)
+	if listenDir == "" {
+		return nil, fmt.Errorf("申报国家 %s 的监听目录未配置", dc)
 	}
-	if dc == "BE" {
-		listenDir = viper.GetString("watcher.be.watch-dir")
-	}
-	fmt.Println("listenDir", listenDir)
+
+	log.Debugf("获取 %s 监听目录下的文件: %s", dc, listenDir)
 	if !util.IsDir(listenDir) || !util.IsExists(listenDir) {
 		return nil, errors.New("the monitoring path is wrong. Check whether the declared country exists")
 	}
@@ -180,7 +180,7 @@ func ExportListenDicFiles(dc string) (files []model.ExportFileListDTO, err error
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("fs", fs)
+	log.Debugf("发现文件: %v", fs)
 
 	for _, f := range fs {
 		info, err := os.Stat(f)
@@ -199,7 +199,7 @@ func ExportListenDicFiles(dc string) (files []model.ExportFileListDTO, err error
 			}
 			files = append(files, ef)
 		} else {
-			log.Errorf("File: %s get stat failed, error: %v", f, err)
+			log.Errorf("获取文件 %s 的 stat 失败, error: %v", f, err)
 		}
 	}
 

@@ -19,4 +19,12 @@ type (
 		// 修改时间
 		ModTime string `json:"modifiedTime"`
 	}
+
+	// FileMoverParam 文件移动参数
+	FileMoverParam struct {
+		// 源文件路径
+		SourceFile string `json:"sourceFile"`
+		// 目标文件路径
+		MoveTo string `json:"moveTo"`
+	}
 )

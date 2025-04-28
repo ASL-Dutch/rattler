@@ -6,7 +6,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"sysafari.com/softpak/rattler/internal/model"
 	"sysafari.com/softpak/rattler/internal/service"
-	"sysafari.com/softpak/rattler/internal/util"
 )
 
 // SearchFile Search for tax bill files and Export declaration XML files
@@ -31,8 +30,8 @@ func SearchFile(c echo.Context) (err error) {
 		errs = append(errs, err.Error())
 	}
 	if len(errs) > 0 {
-		return c.JSON(http.StatusBadRequest, &util.ResponseError{
-			Status: util.FAIL,
+		return c.JSON(http.StatusBadRequest, &model.ResponseError{
+			Status: model.FAIL,
 			Errors: errs,
 		})
 	}
@@ -46,8 +45,8 @@ func SearchFile(c echo.Context) (err error) {
 	}
 	files, errs := sf.GetSearchResult()
 	if len(errs) > 0 {
-		return c.JSON(http.StatusBadRequest, &util.ResponseError{
-			Status: util.FAIL,
+		return c.JSON(http.StatusBadRequest, &model.ResponseError{
+			Status: model.FAIL,
 			Errors: errs,
 		})
 	}

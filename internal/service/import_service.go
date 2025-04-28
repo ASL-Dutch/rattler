@@ -9,7 +9,7 @@ import (
 	"strconv"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
+	"sysafari.com/softpak/rattler/internal/config"
 	"sysafari.com/softpak/rattler/internal/util"
 )
 
@@ -38,7 +38,7 @@ func SaveImportDocument(message string) {
 
 	filename := doc.Filename
 	document := doc.Document
-	importDir := viper.GetString("import.xml-dir")
+	importDir := config.GlobalConfig.GetImportXMLDir()
 
 	// 确保导入目录存在
 	if importDir == "" {
