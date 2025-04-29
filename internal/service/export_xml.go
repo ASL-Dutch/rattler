@@ -39,7 +39,6 @@ type ExportXmlInfo struct {
 // Compress the content of the XML file before sending,
 // and then create a json object and send it to the message queue
 func SendExportXml(filename string, declareCountry string) {
-	log.Infof("Declare country: %s export xml: %s reading ", declareCountry, filename)
 
 	// 优先使用文件级别压缩
 	compressedXml, err := util.CompressXMLFile(filename)
