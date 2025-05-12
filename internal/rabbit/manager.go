@@ -26,7 +26,8 @@ type ManagerConfig struct {
 	ReconnectInterval  string
 	PrefetchCount      int
 	AutoAck            bool
-
+	// 是否自动创建交换机和队列
+	AutoCreate bool
 	// 导出服务配置
 	ExportExchange     string
 	ExportExchangeType string
@@ -45,6 +46,7 @@ func DefaultManagerConfig() *ManagerConfig {
 		ReconnectInterval:  "5s",
 		PrefetchCount:      3,
 		AutoAck:            false,
+		AutoCreate:         false,
 		ExportExchange:     "softpak.export.topic",
 		ExportExchangeType: "topic",
 		ExportQueuePrefix:  "softpak.export",
@@ -151,6 +153,7 @@ func (m *Manager) initialize() error {
 		clientConfig.PrefetchCount = DefaultConfig().PrefetchCount
 	}
 	clientConfig.AutoAck = m.config.AutoAck
+	clientConfig.AutoCreate = m.config.AutoCreate
 
 	// 创建RabbitMQ客户端
 	client, err := NewClient(clientConfig)

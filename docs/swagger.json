@@ -134,26 +134,26 @@
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/softpak.ExportFileListDTO"
+                                "$ref": "#/definitions/model.ExportFileListDTO"
                             }
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/util.ResponseError"
+                            "$ref": "#/definitions/model.ResponseError"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/util.ResponseError"
+                            "$ref": "#/definitions/model.ResponseError"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/util.ResponseError"
+                            "$ref": "#/definitions/model.ResponseError"
                         }
                     }
                 }
@@ -186,7 +186,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/web.FileResendRequest"
+                            "$ref": "#/definitions/model.FileResendRequest"
                         }
                     }
                 ],
@@ -196,26 +196,26 @@
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/softpak.ExportFileListDTO"
+                                "$ref": "#/definitions/model.ExportFileListDTO"
                             }
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/util.ResponseError"
+                            "$ref": "#/definitions/model.ResponseError"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/util.ResponseError"
+                            "$ref": "#/definitions/model.ResponseError"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/util.ResponseError"
+                            "$ref": "#/definitions/model.ResponseError"
                         }
                     }
                 }
@@ -241,7 +241,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/web.SearchFileRequest"
+                            "$ref": "#/definitions/model.SearchFileRequest"
                         }
                     }
                 ],
@@ -251,26 +251,26 @@
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/softpak.SearchFileResult"
+                                "$ref": "#/definitions/model.SearchFileResult"
                             }
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/util.ResponseError"
+                            "$ref": "#/definitions/model.ResponseError"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/util.ResponseError"
+                            "$ref": "#/definitions/model.ResponseError"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/util.ResponseError"
+                            "$ref": "#/definitions/model.ResponseError"
                         }
                     }
                 }
@@ -278,7 +278,7 @@
         }
     },
     "definitions": {
-        "softpak.ExportFileListDTO": {
+        "model.ExportFileListDTO": {
             "type": "object",
             "properties": {
                 "filename": {
@@ -298,25 +298,30 @@
                 }
             }
         },
-        "softpak.SearchFileResult": {
+        "model.FileResendRequest": {
             "type": "object",
+            "required": [
+                "files"
+            ],
             "properties": {
-                "filename": {
+                "customPath": {
+                    "description": "CustomPath 自定义路径(默认：不需要, 特殊情况，用户可能需要指当前需要重新触发监听的export xml 文件所在的路径)",
                     "type": "string"
                 },
-                "filepath": {
-                    "type": "string"
+                "files": {
+                    "description": "Files 需要重新发送的文件名，多个文件名需要在同一路径中。监听路径或者备份路径",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
-                "searchText": {
-                    "type": "string"
-                },
-                "type": {
-                    "description": "Type TAX_BILL, EXPORT_XML",
-                    "type": "string"
+                "inWatchPath": {
+                    "description": "InWatchPath 是否是监听路径中（默认：false,即在备份路径中）",
+                    "type": "boolean"
                 }
             }
         },
-        "util.ResponseError": {
+        "model.ResponseError": {
             "type": "object",
             "properties": {
                 "errors": {
@@ -332,27 +337,7 @@
                 }
             }
         },
-        "web.FileResendRequest": {
-            "type": "object",
-            "required": [
-                "filePaths",
-                "inListeningPath"
-            ],
-            "properties": {
-                "filePaths": {
-                    "description": "FilePaths 需要重新发送的文件名",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "inListeningPath": {
-                    "description": "InListeningPath 是否是监听路径中的文件",
-                    "type": "boolean"
-                }
-            }
-        },
-        "web.SearchFileRequest": {
+        "model.SearchFileRequest": {
             "type": "object",
             "required": [
                 "declareCountry",
@@ -381,6 +366,24 @@
                 },
                 "year": {
                     "description": "Year exp: 2022",
+                    "type": "string"
+                }
+            }
+        },
+        "model.SearchFileResult": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string"
+                },
+                "filepath": {
+                    "type": "string"
+                },
+                "searchText": {
+                    "type": "string"
+                },
+                "type": {
+                    "description": "Type TAX_BILL, EXPORT_XML",
                     "type": "string"
                 }
             }

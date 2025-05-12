@@ -1,5 +1,5 @@
 definitions:
-  softpak.ExportFileListDTO:
+  model.ExportFileListDTO:
     properties:
       filename:
         description: Type TAX_BILL, EXPORT_XML
@@ -13,19 +13,23 @@ definitions:
         description: 文件大小 bytes
         type: integer
     type: object
-  softpak.SearchFileResult:
+  model.FileResendRequest:
     properties:
-      filename:
+      customPath:
+        description: CustomPath 自定义路径(默认：不需要, 特殊情况，用户可能需要指当前需要重新触发监听的export xml 文件所在的路径)
         type: string
-      filepath:
-        type: string
-      searchText:
-        type: string
-      type:
-        description: Type TAX_BILL, EXPORT_XML
-        type: string
+      files:
+        description: Files 需要重新发送的文件名，多个文件名需要在同一路径中。监听路径或者备份路径
+        items:
+          type: string
+        type: array
+      inWatchPath:
+        description: InWatchPath 是否是监听路径中（默认：false,即在备份路径中）
+        type: boolean
+    required:
+    - files
     type: object
-  util.ResponseError:
+  model.ResponseError:
     properties:
       errors:
         description: Error messages
@@ -36,21 +40,7 @@ definitions:
         description: Status success, fail
         type: string
     type: object
-  web.FileResendRequest:
-    properties:
-      filePaths:
-        description: FilePaths 需要重新发送的文件名
-        items:
-          type: string
-        type: array
-      inListeningPath:
-        description: InListeningPath 是否是监听路径中的文件
-        type: boolean
-    required:
-    - filePaths
-    - inListeningPath
-    type: object
-  web.SearchFileRequest:
+  model.SearchFileRequest:
     properties:
       declareCountry:
         description: DeclareCountry NL, BE
@@ -73,6 +63,18 @@ definitions:
     - declareCountry
     - filenames
     - type
+    type: object
+  model.SearchFileResult:
+    properties:
+      filename:
+        type: string
+      filepath:
+        type: string
+      searchText:
+        type: string
+      type:
+        description: Type TAX_BILL, EXPORT_XML
+        type: string
     type: object
 info:
   contact: {}
@@ -163,20 +165,20 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/softpak.ExportFileListDTO'
+              $ref: '#/definitions/model.ExportFileListDTO'
             type: array
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/util.ResponseError'
+            $ref: '#/definitions/model.ResponseError'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/util.ResponseError'
+            $ref: '#/definitions/model.ResponseError'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/util.ResponseError'
+            $ref: '#/definitions/model.ResponseError'
       summary: 获取Export监听路径下当前文件列表
       tags:
       - export
@@ -196,7 +198,7 @@ paths:
         name: message
         required: true
         schema:
-          $ref: '#/definitions/web.FileResendRequest'
+          $ref: '#/definitions/model.FileResendRequest'
       produces:
       - application/json
       responses:
@@ -204,20 +206,20 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/softpak.ExportFileListDTO'
+              $ref: '#/definitions/model.ExportFileListDTO'
             type: array
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/util.ResponseError'
+            $ref: '#/definitions/model.ResponseError'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/util.ResponseError'
+            $ref: '#/definitions/model.ResponseError'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/util.ResponseError'
+            $ref: '#/definitions/model.ResponseError'
       summary: 重新发送Export XML 文件
       tags:
       - export
@@ -232,7 +234,7 @@ paths:
         name: message
         required: true
         schema:
-          $ref: '#/definitions/web.SearchFileRequest'
+          $ref: '#/definitions/model.SearchFileRequest'
       produces:
       - application/json
       responses:
@@ -240,20 +242,20 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/softpak.SearchFileResult'
+              $ref: '#/definitions/model.SearchFileResult'
             type: array
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/util.ResponseError'
+            $ref: '#/definitions/model.ResponseError'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/util.ResponseError'
+            $ref: '#/definitions/model.ResponseError'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/util.ResponseError'
+            $ref: '#/definitions/model.ResponseError'
       summary: 搜索文件
       tags:
       - search

@@ -17,10 +17,10 @@ import (
 // @Accept       json
 // @Produce      json
 // @Param        dc  path  	  string   true  "申报国家(BE|NL)"
-// @Success      200 {object} []softpak.ExportFileListDTO
-// @Failure      400 {object} util.ResponseError
-// @Failure      404 {object} util.ResponseError
-// @Failure      500 {object} util.ResponseError
+// @Success      200 {object} []model.ExportFileListDTO
+// @Failure      400 {object} model.ResponseError
+// @Failure      404 {object} model.ResponseError
+// @Failure      500 {object} model.ResponseError
 // @Router       /export/list/{dc} [get]
 func ExportListenFiles(c echo.Context) (err error) {
 	dc := strings.ToUpper(c.Param("dc"))
@@ -47,11 +47,11 @@ func ExportListenFiles(c echo.Context) (err error) {
 // @Accept       json
 // @Produce      json
 // @Param        dc   	  path  string   true  "申报国家(BE|NL)"
-// @Param        message body   FileResendRequest true  "需要重新发送的文件完整路径"
-// @Success      200 {object} []softpak.ExportFileListDTO
-// @Failure      400 {object} util.ResponseError
-// @Failure      404 {object} util.ResponseError
-// @Failure      500 {object} util.ResponseError
+// @Param        message body   model.FileResendRequest true  "需要重新发送的文件完整路径"
+// @Success      200 {object} []model.ExportFileListDTO
+// @Failure      400 {object} model.ResponseError
+// @Failure      404 {object} model.ResponseError
+// @Failure      500 {object} model.ResponseError
 // @Router       /export/remover/{dc} [post]
 func ExportFileResend(c echo.Context) (err error) {
 	dc := strings.ToUpper(c.Param("dc"))

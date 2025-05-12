@@ -14,11 +14,11 @@ import (
 // @Tags         search
 // @Accept       json
 // @Produce      json
-// @Param        message  body  SearchFileRequest  true  "检索内容"
-// @Success      200 {object} []softpak.SearchFileResult
-// @Failure      400 {object} util.ResponseError
-// @Failure      404 {object} util.ResponseError
-// @Failure      500 {object} util.ResponseError
+// @Param        message  body  model.SearchFileRequest  true  "检索内容"
+// @Success      200 {object} []model.SearchFileResult
+// @Failure      400 {object} model.ResponseError
+// @Failure      404 {object} model.ResponseError
+// @Failure      500 {object} model.ResponseError
 // @Router       /search/file [post]
 func SearchFile(c echo.Context) (err error) {
 	var errs []string

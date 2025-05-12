@@ -37,7 +37,7 @@ func getRabbitConfig() *rabbit.ManagerConfig {
 		ReconnectInterval:  rabbitConfig.ReconnectInterval,
 		PrefetchCount:      rabbitConfig.PrefetchCount,
 		AutoAck:            rabbitConfig.AutoAck,
-
+		AutoCreate:         true,
 		// 导出服务配置
 		ExportExchange:     rabbitConfig.Export.Exchange,
 		ExportExchangeType: rabbitConfig.Export.ExchangeType,

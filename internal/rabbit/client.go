@@ -33,6 +33,9 @@ type Config struct {
 	// Consumer settings
 	PrefetchCount int  // QoS prefetch count for better load distribution
 	AutoAck       bool // Whether to use auto acknowledgement mode
+
+	// Auto-create settings
+	AutoCreate bool // Whether to auto-create exchange/queue if not exists
 }
 
 // DefaultConfig returns a Config with sensible defaults
@@ -48,6 +51,7 @@ func DefaultConfig() *Config {
 		EnableTLS:          false,
 		PrefetchCount:      3,
 		AutoAck:            false,
+		AutoCreate:         false,
 	}
 }
 
@@ -327,6 +331,24 @@ func (c *Client) DeclareQueue(queueName string, durable, autoDelete, exclusive b
 	}
 	defer c.releaseChannel(ch, conn)
 
+	// Existence check and auto-create logic
+	if !c.config.AutoCreate {
+		// Try passive declare (existence check)
+		q, err := ch.QueueDeclarePassive(
+			queueName,  // name
+			durable,    // durable
+			autoDelete, // auto-delete
+			exclusive,  // exclusive
+			false,      // no-wait
+			nil,        // arguments
+		)
+		if err != nil {
+			return amqp.Queue{}, fmt.Errorf("queue '%s' does not exist and auto-create is disabled: %w", queueName, err)
+		}
+		return q, nil
+	}
+
+	// Auto-create or declare as usual
 	return ch.QueueDeclare(
 		queueName,  // name
 		durable,    // durable
@@ -345,6 +367,25 @@ func (c *Client) DeclareExchange(exchangeName, exchangeType string, durable, aut
 	}
 	defer c.releaseChannel(ch, conn)
 
+	// Existence check and auto-create logic
+	if !c.config.AutoCreate {
+		// Try passive declare (existence check)
+		err := ch.ExchangeDeclarePassive(
+			exchangeName, // name
+			exchangeType, // type
+			durable,      // durable
+			autoDelete,   // auto-delete
+			internal,     // internal
+			false,        // no-wait
+			nil,          // arguments
+		)
+		if err != nil {
+			return fmt.Errorf("exchange '%s' does not exist and auto-create is disabled: %w", exchangeName, err)
+		}
+		return nil
+	}
+
+	// Auto-create or declare as usual
 	return ch.ExchangeDeclare(
 		exchangeName, // name
 		exchangeType, // type
