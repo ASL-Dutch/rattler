@@ -23,14 +23,18 @@ var cfgFile string
 var rootCmd = &cobra.Command{
 	Use:   "rattler",
 	Short: "SoftPak Client",
-	Long: `Rattler will simultaneously start the file server to access 
-the Export XML file and the tax bill file, and simultaneously start the 
-Import XML listener and the Export XML (NL|BE) file creation listener asynchronously. 
+	Long: `Rattler will simultaneously start the file server to access
+the Export XML file and the tax bill file, and simultaneously start the
+Import XML listener and the Export XML (NL|BE) file creation listener asynchronously.
 For example:`,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	Run: func(cmd *cobra.Command, args []string) {
 		// Initialize global configuration
+		// 包括：
+		// 1. 配置文件初始化
+		// 2. 日志初始化
+		// 3. 文件移动队列初始化
 		if err := config.InitConfig(); err != nil {
 			log.Fatalf("Failed to initialize configuration: %v", err)
 		}
@@ -51,11 +55,9 @@ For example:`,
 		// 开启Export XML文件监听
 		StartWatchExportXmlDirWorker()
 
-		// 开启文件移动处理
-		// 考虑到：
-		// 1. 文件移动属于文件系统操作，可能在系统繁忙时，文件移动处理会阻塞，因此考虑异步处理
-		// 2. 也就是所有涉及到文件系统中文件修改路径的操作，都应该放入此队列中交由异步队列处理
-		StartMoveFileWorker()
+		// 开启税单文件监听
+		StartWatchTaxBillDirWorker()
+
 
 		// start file server
 		web.StartServer()

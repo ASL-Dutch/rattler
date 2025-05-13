@@ -11,71 +11,119 @@ import (
 	"sysafari.com/softpak/rattler/internal/util"
 )
 
-// HandleExportXmlCreateEvent 处理Export XML文件创建事件
-func HandleExportXmlCreateEvent(filename string, additionalData interface{}) error {
-	log.Infof("处理 %s 申报国家的 Export XML 文件: %s", additionalData.(string), filename)
+// FileHandler 定义文件处理函数类型
+type FileHandler func(filename string, country string) error
+
+// 处理Export XML文件创建事件
+func handleExportXmlCreateEvent(filename string, country string) error {
+	log.Infof("处理 %s 申报国家的 Export XML 文件: %s", country, filename)
 
 	if !util.IsExists(filename) {
 		log.Errorf("触发监听的文件不存在，请检查是否手动移除了此文件: %s", filename)
 		return fmt.Errorf("触发监听的文件不存在，请检查是否手动移除了此文件: %s", filename)
 	}
 
-	service.SendExportXml(filename, additionalData.(string))
-
+	service.SendExportXml(filename, country)
 	return nil
 }
 
-// 监听Export XML文件
-func WatchExportXmlDir(dir string, declareCountry string) {
-	log.Infof("开始监控 %s 申报国家的 XML 文件目录: %s", declareCountry, dir)
+// 处理税单创建事件
+func handleTaxBillCreateEvent(filename string, country string) error {
+	log.Infof("处理 %s 税单文件: %s", country, filename)
+	return nil
+}
+
+// 启动文件监听器
+func startFileWatcher(dir string, country string, filePattern string, fileType string, handler FileHandler) {
+	log.Infof("开始监控 %s 申报国家的%s文件目录: %s", country, fileType, dir)
 
 	// 确保监控目录存在
 	if !util.IsDir(dir) {
 		log.Panicf("监控目录: %s 不存在或不是目录，请检查配置", dir)
 	}
 
+	// 处理文件创建事件的包装函数，转换参数类型
+	handlerWrapper := func(filename string, additionalData interface{}) error {
+		return handler(filename, additionalData.(string))
+	}
+
 	// 创建FSWatcher配置
 	config := component.FSWatcherConfig{
 		Dir:            dir,
-		Operations:     component.Create,           // 只监听创建事件
-		FilePattern:    ".*\\.xml",                 // 只监听XML文件
-		WaitTime:       5,                          // 等待5秒
-		MaxRetries:     10,                         // 最多重试10次
-		MinFileSize:    100,                        // 最小文件大小100字节
-		Handler:        HandleExportXmlCreateEvent, // 处理函数
-		AdditionalData: declareCountry,             // 传递申报国家信息
+		Operations:     component.Create, // 只监听创建事件
+		FilePattern:    filePattern,      // 文件匹配模式
+		WaitTime:       5,                // 等待5秒
+		MaxRetries:     10,               // 最多重试10次
+		MinFileSize:    100,              // 最小文件大小100字节
+		Handler:        handlerWrapper,   // 处理函数
+		AdditionalData: country,          // 传递申报国家信息
 	}
 
 	watcher := component.NewFSWatcher(config)
 	err := watcher.Start()
 	if err != nil {
-		log.Errorf("启动 %s 申报国家的 Export XML 文件监听失败: %v", declareCountry, err)
+		log.Errorf("启动 %s 申报国家的%s文件监听失败: %v", country, fileType, err)
 	}
 }
 
 // StartWatchExportXmlDirWorker 启动Export XML文件监听
-// 根据配置文件中的监听配置，分别启动NL和BE国家的Export XML文件监听
 func StartWatchExportXmlDirWorker() {
-	if config.GlobalConfig.Watchers.Export.Enabled {
-		log.Info("开启 Export XML 文件监听 ...")
+	if !config.GlobalConfig.Watchers.Export.Enabled {
+		return
+	}
 
-		// 监听NL国家的Export XML文件
-		if config.GlobalConfig.Watchers.Export.NL.Enabled {
-			WatchExportXmlDir(config.GlobalConfig.Watchers.Export.NL.WatchDir, "NL")
-		}
+	log.Info("开启 Export XML 文件监听 ...")
 
-		// 监听BE国家的Export XML文件
-		if config.GlobalConfig.Watchers.Export.BE.Enabled {
-			WatchExportXmlDir(config.GlobalConfig.Watchers.Export.BE.WatchDir, "BE")
-		}
+	// 监听NL国家的Export XML文件
+	if config.GlobalConfig.Watchers.Export.NL.Enabled {
+		startFileWatcher(
+			config.GlobalConfig.Watchers.Export.NL.WatchDir,
+			"NL",
+			".*\\.xml",
+			"XML",
+			handleExportXmlCreateEvent,
+		)
+	}
 
+	// 监听BE国家的Export XML文件
+	if config.GlobalConfig.Watchers.Export.BE.Enabled {
+		startFileWatcher(
+			config.GlobalConfig.Watchers.Export.BE.WatchDir,
+			"BE",
+			".*\\.xml",
+			"XML",
+			handleExportXmlCreateEvent,
+		)
 	}
 }
 
-// StartMoveFileWorker 启动文件移动处理程序
-func StartMoveFileWorker() {
-	// 初始化NL国家的文件移动处理程序
-	if config.GlobalConfig.FileMover.Enabled {
-		config.InitFileMover()
+// StartWatchTaxBillDirWorker 启动税单文件监听
+func StartWatchTaxBillDirWorker() {
+	if !config.GlobalConfig.Watchers.Pdf.Enabled {
+		return
+	}
+
+	log.Info("开启税单文件监听 ...")
+
+	// 监听NL国家的税单文件
+	if config.GlobalConfig.Watchers.Pdf.NL.Enabled {
+		startFileWatcher(
+			config.GlobalConfig.Watchers.Pdf.NL.WatchDir,
+			"NL",
+			"(?i).*\\.pdf",
+			"税单",
+			handleTaxBillCreateEvent,
+		)
+	}
+
+	// 监听BE国家的税单文件
+	if config.GlobalConfig.Watchers.Pdf.BE.Enabled {
+		startFileWatcher(
+			config.GlobalConfig.Watchers.Pdf.BE.WatchDir,
+			"BE",
+			"(?i).*\\.pdf",
+			"税单",
+			handleTaxBillCreateEvent,
+		)
 	}
 }

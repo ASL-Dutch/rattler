@@ -220,7 +220,10 @@ func InitConfig() error {
 	// Set global configuration
 	GlobalConfig = config
 
-	// Initialize cleaners based on configuration
+	// 开启文件移动处理
+	// 考虑到：
+	// 1. 文件移动属于文件系统操作，可能在系统繁忙时，文件移动处理会阻塞，因此考虑异步处理
+	// 2. 也就是所有涉及到文件系统中文件修改路径的操作，都应该放入此队列中交由异步队列处理
 	InitFileMover()
 
 	log.Infof("Configuration loaded successfully")

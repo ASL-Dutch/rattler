@@ -63,7 +63,7 @@ func InitRabbitMQ() error {
 			return
 		}
 
-		log.Info("RabbitMQ manager initialized successfully")
+		log.Info("RabbitMQ manager initialized successfully ...")
 	})
 
 	return err
@@ -179,7 +179,7 @@ func StartImportXmlConsumer() error {
 	// 在goroutine中启动消费
 	go func() {
 		defer consumerWg.Done()
-		log.Infof("Import XML consumer started: %s", consumerName)
+		log.Infof("Import XML consumer started: %s ...", consumerName)
 
 		// 定义消息处理函数 - 根据 ConsumeWithContext 接口定义匹配参数类型
 		messageHandler := func(ctx context.Context, msg []byte) error {
