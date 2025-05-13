@@ -38,5 +38,7 @@ type (
 		SourceFile string `json:"sourceFile"`
 		// 目标文件路径
 		MoveTo string `json:"moveTo"`
+		// 是否复制
+		IsCopy bool `json:"isCopy"`
 	}
 )

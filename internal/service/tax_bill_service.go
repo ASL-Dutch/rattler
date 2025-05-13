@@ -66,6 +66,8 @@ func (s *TaxBillService) MoveTaxBillToBackup(filePath, country string) (string, 
 	fileMoverParam := model.FileMoverParam{
 		SourceFile: filePath,
 		MoveTo:     targetPath,
+		// 如果启用冗余备份，则使用复制，否则使用移动
+		IsCopy:     config.GlobalConfig.IsKeepOriginalEnabled(country),
 	}
 
 	// 通过消息队列发布文件移动请求
@@ -103,8 +105,17 @@ func (s *TaxBillService) FindTaxBillFile(filename, country string) (string, erro
 
 		return s.findFileInDirectory(filename, filepath.Join(backupDir, year, month))
 	} else {
-		// 没有前缀，直接在备份目录根目录下查找
-		return s.findFileInDirectory(filename, backupDir)
+		// 没有前缀，在监听路径下查找
+		watchDir := config.GlobalConfig.GetPdfWatchDir(country)
+		if watchDir == "" {
+			return "", fmt.Errorf("国家 %s 的税金单监听目录未配置", country)
+		}
+
+		if !util.IsExists(watchDir) {
+			return "", fmt.Errorf("国家 %s 的税金单监听目录不存在", country)
+		}
+
+		return s.findFileInDirectory(filename, watchDir)
 	}
 }
 

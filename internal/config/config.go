@@ -89,6 +89,9 @@ type CountryWatchConfig struct {
 	// Enabled indicates whether watching is enabled for this country
 	Enabled bool `mapstructure:"enabled"`
 
+	// KeepOriginal indicates whether to keep the original file
+	KeepOriginal bool `mapstructure:"keep-original"`
+
 	// WatchDir is the directory to watch for new files
 	WatchDir string `mapstructure:"watch-dir"`
 
@@ -254,10 +257,18 @@ func handleFileMover(param string) error {
 		moveTo = absMoveTo
 	}
 
-	// 移动文件, 如果目标目录不存在则创建
-	if err := util.MoveFile(sourceFile, moveTo, true); err != nil {
-		log.Errorf("[%s] 移动文件失败: %v", FileMoverQueue.Name, err)
-		return err
+	if fileMoverParam.IsCopy {
+		// 复制文件
+		if err := util.CopyFile(sourceFile, moveTo); err != nil {
+			log.Errorf("[%s] 复制文件失败: %v", FileMoverQueue.Name, err)
+			return err
+		}
+	} else {
+		// 移动文件, 如果目标目录不存在则创建
+		if err := util.MoveFile(sourceFile, moveTo, true); err != nil {
+			log.Errorf("[%s] 移动文件失败: %v", FileMoverQueue.Name, err)
+			return err
+		}
 	}
 
 	log.Infof("[%s] 成功移动文件: %s -> %s", FileMoverQueue.Name, sourceFile, moveTo)
@@ -426,17 +437,22 @@ func (c *AppConfig) IsPdfWatcherEnabled(country string) bool {
 	}
 }
 
-// GetExportDir returns the export directory for a specific country
-func (c *AppConfig) GetExportDir(country string) string {
+// IsKeepOriginalEnabled checks if keep original is enabled for a specific country
+func (c *AppConfig) IsKeepOriginalEnabled(country string) bool {
+	if !c.Watchers.Pdf.Enabled {
+		return false
+	}
+
 	country = normalizeCountry(country)
 
 	if country == "NL" {
-		return c.Storage.NL.Export
+		return c.Watchers.Pdf.NL.KeepOriginal
 	} else if country == "BE" {
-		return c.Storage.BE.Export
+		return c.Watchers.Pdf.BE.KeepOriginal
 	} else {
-		return ""
+		return false
 	}
+
 }
 
 // GetTaxBillDir returns the tax bill directory for a specific country

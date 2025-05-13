@@ -78,7 +78,7 @@ func DownloadExportXml(c echo.Context) error {
 	needDownload := c.QueryParam("download")
 
 	// 使用配置对象获取路径
-	exportDir := config.GlobalConfig.GetExportDir(dc)
+	exportDir := config.GlobalConfig.GetExportBackupDir(dc)
 	if exportDir == "" {
 		return c.String(http.StatusNotFound,
 			fmt.Sprintf("%s is not a valid declare country or export directory not configured", dc))
