@@ -15,6 +15,63 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/tax-bills/{country}/download/{filename}": {
+            "get": {
+                "description": "下载指定国家的税金单文件",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "tax-bill"
+                ],
+                "summary": "下载税金单文件",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "国家代码(NL|BE)",
+                        "name": "country",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "文件名",
+                        "name": "filename",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "文件内容",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/model.ResponseError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/model.ResponseError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/model.ResponseError"
+                        }
+                    }
+                }
+            }
+        },
         "/download/pdf/{origin}/{target}": {
             "get": {
                 "description": "通过申报国家确定税金文件路径",

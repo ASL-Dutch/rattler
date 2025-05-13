@@ -79,6 +79,44 @@ definitions:
 info:
   contact: {}
 paths:
+  /api/tax-bills/{country}/download/{filename}:
+    get:
+      consumes:
+      - application/json
+      description: 下载指定国家的税金单文件
+      parameters:
+      - description: 国家代码(NL|BE)
+        in: path
+        name: country
+        required: true
+        type: string
+      - description: 文件名
+        in: path
+        name: filename
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: 文件内容
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/model.ResponseError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/model.ResponseError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/model.ResponseError'
+      summary: 下载税金单文件
+      tags:
+      - tax-bill
   /download/pdf/{origin}/{target}:
     get:
       consumes:

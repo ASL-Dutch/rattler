@@ -51,4 +51,8 @@ func registerRoutes(e *echo.Echo) {
 	// Export routes
 	e.GET("/export/list/:dc", handler.ExportListenFiles)
 	e.POST("/export/remover/:dc", handler.ExportFileResend)
+
+	// Tax bill routes
+	taxBillHandler := handler.NewTaxBillHandler()
+	e.GET("/api/tax-bills/:country/download/:filename", taxBillHandler.DownloadTaxBill)
 }

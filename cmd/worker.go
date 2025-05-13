@@ -30,6 +30,19 @@ func handleExportXmlCreateEvent(filename string, country string) error {
 // 处理税单创建事件
 func handleTaxBillCreateEvent(filename string, country string) error {
 	log.Infof("处理 %s 税单文件: %s", country, filename)
+
+	if !util.IsExists(filename) {
+		log.Errorf("触发监听的文件不存在，请检查是否手动移除了此文件: %s", filename)
+		return fmt.Errorf("触发监听的文件不存在，请检查是否手动移除了此文件: %s", filename)
+	}
+
+	taxBillService := service.NewTaxBillService()
+	_, err := taxBillService.MoveTaxBillToBackup(filename, country)
+	if err != nil {
+		log.Errorf("备份 %s 的税金单文件 %s 失败: %v", country, filename, err)
+		return fmt.Errorf("备份 %s 的税金单文件 %s 失败: %v", country, filename, err)
+	}
+
 	return nil
 }
 
@@ -97,6 +110,11 @@ func StartWatchExportXmlDirWorker() {
 	}
 }
 
+const (
+	// TaxBillFilePattern 税单文件匹配模式, 不区分 pdf，PDF, Pdf 等大小写
+	TaxBillFilePattern = ".*\\.(?i)pdf$"
+)
+
 // StartWatchTaxBillDirWorker 启动税单文件监听
 func StartWatchTaxBillDirWorker() {
 	if !config.GlobalConfig.Watchers.Pdf.Enabled {
@@ -110,7 +128,7 @@ func StartWatchTaxBillDirWorker() {
 		startFileWatcher(
 			config.GlobalConfig.Watchers.Pdf.NL.WatchDir,
 			"NL",
-			"(?i).*\\.pdf",
+			TaxBillFilePattern,
 			"税单",
 			handleTaxBillCreateEvent,
 		)
@@ -121,7 +139,7 @@ func StartWatchTaxBillDirWorker() {
 		startFileWatcher(
 			config.GlobalConfig.Watchers.Pdf.BE.WatchDir,
 			"BE",
-			"(?i).*\\.pdf",
+			TaxBillFilePattern,
 			"税单",
 			handleTaxBillCreateEvent,
 		)

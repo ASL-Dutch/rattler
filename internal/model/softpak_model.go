@@ -20,6 +20,18 @@ type (
 		ModTime string `json:"modifiedTime"`
 	}
 
+	// TaxBillFileDTO 税金单文件DTO
+	TaxBillFileDTO struct {
+		// 文件名
+		Filename string `json:"filename"`
+		// 文件路径
+		Filepath string `json:"filepath"`
+		// 文件大小 bytes
+		Size int64 `json:"size"`
+		// 修改时间
+		ModTime string `json:"modTime"`
+	}
+
 	// FileMoverParam 文件移动参数
 	FileMoverParam struct {
 		// 源文件路径
