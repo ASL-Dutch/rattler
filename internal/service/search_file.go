@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
+	"sysafari.com/softpak/rattler/internal/config"
 	"sysafari.com/softpak/rattler/internal/model"
 	"sysafari.com/softpak/rattler/internal/util"
 )
@@ -29,23 +29,16 @@ type SearchFile struct {
 // ready Ready for search
 func (sf *SearchFile) ready() {
 	fmt.Println(sf.DeclareCountry)
-	if "NL" == sf.DeclareCountry {
-		if "TAX_BILL" == sf.Type {
-			sf.Directory = viper.GetString("ser-dir.nl.tax-bill")
-		}
-		if "EXPORT_XML" == sf.Type {
-			sf.Directory = viper.GetString("watcher.nl.backup-dir")
-		}
+
+	sf.Directory = config.GlobalConfig.GetTaxBillDir(sf.DeclareCountry)
+
+	if sf.Type == "TAX_BILL" {
+		sf.Directory = config.GlobalConfig.GetTaxBillDir(sf.DeclareCountry)
+	}
+	if sf.Type == "EXPORT_XML" {
+		sf.Directory = config.GlobalConfig.GetExportBackupDir(sf.DeclareCountry)
 	}
 
-	if "BE" == sf.DeclareCountry {
-		if "TAX_BILL" == sf.Type {
-			sf.Directory = viper.GetString("ser-dir.be.tax-bill")
-		}
-		if "EXPORT_XML" == sf.Type {
-			sf.Directory = viper.GetString("watcher.be.backup-dir")
-		}
-	}
 	if sf.Year != "" {
 		sf.Directory = filepath.Join(sf.Directory, sf.Year)
 	}
