@@ -460,9 +460,9 @@ func (c *AppConfig) GetTaxBillDir(country string) string {
 	country = normalizeCountry(country)
 
 	if country == "NL" {
-		return c.Storage.NL.TaxBill
+		return c.Watchers.Pdf.NL.BackupDir
 	} else if country == "BE" {
-		return c.Storage.BE.TaxBill
+		return c.Watchers.Pdf.BE.BackupDir
 	} else {
 		return ""
 	}
