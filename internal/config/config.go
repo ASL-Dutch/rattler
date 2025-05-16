@@ -468,6 +468,32 @@ func (c *AppConfig) GetTaxBillDir(country string) string {
 	}
 }
 
+// GetStorageTaxBillDir returns the storage tax bill directory for a specific country
+func (c *AppConfig) GetStorageTaxBillDir(country string) string {
+	country = normalizeCountry(country)
+
+	if country == "NL" {
+		return c.Storage.NL.TaxBill
+	} else if country == "BE" {
+		return c.Storage.BE.TaxBill
+	} else {
+		return ""
+	}
+}
+
+// GetStorageExportDir returns the storage export directory for a specific country
+func (c *AppConfig) GetStorageExportDir(country string) string {
+	country = normalizeCountry(country)
+
+	if country == "NL" {
+		return c.Storage.NL.Export
+	} else if country == "BE" {
+		return c.Storage.BE.Export
+	} else {
+		return ""
+	}
+}
+
 // GetImportXMLDir returns the import XML directory
 func (c *AppConfig) GetImportXMLDir() string {
 	return c.Import.XMLDir

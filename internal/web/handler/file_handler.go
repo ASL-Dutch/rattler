@@ -40,7 +40,7 @@ func DownloadTaxPdf(c echo.Context) error {
 
 	// 使用配置对象获取路径
 	var filePath string
-	taxBillDir := config.GlobalConfig.GetTaxBillDir(dc)
+	taxBillDir := config.GlobalConfig.GetStorageTaxBillDir(dc)
 	if taxBillDir == "" {
 		return c.String(http.StatusNotFound,
 			fmt.Sprintf("未配置申报国家 %s 的税单目录", dc))
@@ -78,7 +78,7 @@ func DownloadExportXml(c echo.Context) error {
 	needDownload := c.QueryParam("download")
 
 	// 使用配置对象获取路径
-	exportDir := config.GlobalConfig.GetExportBackupDir(dc)
+	exportDir := config.GlobalConfig.GetStorageExportDir(dc)
 	if exportDir == "" {
 		return c.String(http.StatusNotFound,
 			fmt.Sprintf("%s is not a valid declare country or export directory not configured", dc))
