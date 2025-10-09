@@ -8,39 +8,27 @@
 
 # BE tax documents service (HTTP + HTTPS)
 be.tax.local:2015, https://be.tax.local {
-	# 统一 root 到 out/backup/pdf/be
-	root * {BE_ROOT_PATH}
-
 	log {
-		output file {LOG_PATH}/be-access.log
+		output file out/log/caddy/be-access.log
 		format json
 		level DEBUG
 	}
 
-	# Basic authentication (currently disabled)
-	# basic_auth {
-	#     admin $2a$14$nf9uRbglbfvOlFH74sR4cu9PMqubj6Rgw0of29JGzSwk87wjXhp7q # example hash - 666666
-	# }
-
-	# For dated files (YYYYMM_filename) - rewrite to year/month structure
 	@dated_files {
 		path_regexp dated_pattern ^/(20[0-9]{2})(0[1-9]|1[0-2])_(.*)$
 	}
 
-	# 先尝试按日期重写
 	handle @dated_files {
+		root * {the-date-root-path}
 		rewrite * /{http.regexp.dated_pattern.1}/{http.regexp.dated_pattern.2}/{http.regexp.dated_pattern.1}{http.regexp.dated_pattern.2}_{http.regexp.dated_pattern.3}
 		file_server
 	}
 
-	# 其它情况，尝试查找 BE 默认目录
 	handle {
-		# 这里用 try_files，先查找当前 root（{BE_ROOT_PATH}），找不到就查找 BE 默认目录（{BE_ROOT_PATH_DEFAULT}）
-		try_files {path} {BE_ROOT_PATH_DEFAULT}{path}
+		root * {the-default-root-path}
 		file_server
 	}
 
-	# Security headers
 	header {
 		-Server
 		X-Content-Type-Options "nosniff"
@@ -51,10 +39,8 @@ be.tax.local:2015, https://be.tax.local {
 
 # NL tax documents service (HTTP + HTTPS)
 nl.tax.local:2015, https://nl.tax.local {
-	root * {NL_ROOT_PATH}
-
 	log {
-		output file {LOG_PATH}/nl-access.log
+		output file out/log/caddy/nl-access.log
 		format json
 		level DEBUG
 	}
@@ -64,17 +50,16 @@ nl.tax.local:2015, https://nl.tax.local {
 	}
 
 	handle @dated_files {
+		root * {the-date-root-path}
 		rewrite * /{http.regexp.dated_pattern.1}/{http.regexp.dated_pattern.2}/{http.regexp.dated_pattern.1}{http.regexp.dated_pattern.2}_{http.regexp.dated_pattern.3}
 		file_server
 	}
 
 	handle {
-		# 非日期文件，fallback 到 NL 默认目录（{NL_ROOT_PATH_DEFAULT}）
-		try_files {path} {NL_ROOT_PATH_DEFAULT}{path}
+		root * {the-default-root-path}
 		file_server
 	}
 
-	# Security headers
 	header {
 		-Server
 		X-Content-Type-Options "nosniff"

@@ -19,3 +19,7 @@ dist/
 *test.yaml
 
 file_structure_ncc.md
+
+# Caddy
+Caddyfile-win
+Caddyfile-linux
