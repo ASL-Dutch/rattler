@@ -19,5 +19,11 @@ dist/
 # Project exclude paths
 .rattler-win.yaml
 .rattler-test.yaml
+rattler-ncc-win.yaml
+rattler-win.yaml
 
 file_structure_ncc.md
+
+# Caddyfile
+Caddyfile
+Caddyfile-win
