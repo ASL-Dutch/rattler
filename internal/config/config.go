@@ -125,6 +125,9 @@ type PdfWatchConfig struct {
 
 // WatchersConfig contains all watchers configuration
 type WatchersConfig struct {
+	// WatchSubdirs 是否递归监听子目录；默认 false，仅监听目标目录本身，避免递归风险
+	WatchSubdirs bool `mapstructure:"watch-subdirs"`
+
 	// Export contains Export (XML) watch configuration
 	Export ExportWatchConfig `mapstructure:"export"`
 

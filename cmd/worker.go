@@ -11,6 +11,12 @@ import (
 	"sysafari.com/softpak/rattler/internal/util"
 )
 
+// 全局文件事件处理器（按国家分别创建）
+var (
+	exportXmlProcessors map[string]*component.FileProcessor // key: country
+	taxBillProcessors   map[string]*component.FileProcessor // key: country
+)
+
 // FileHandler 定义文件处理函数类型
 type FileHandler func(filename string, country string) error
 
@@ -46,7 +52,7 @@ func handleTaxBillCreateEvent(filename string, country string) error {
 	return nil
 }
 
-// 启动文件监听器
+// 启动文件监听器（新架构：使用事件通道解耦监听和处理）
 func startFileWatcher(dir string, country string, filePattern string, fileType string, handler FileHandler) {
 	log.Infof("开始监控 %s 申报国家的%s文件目录: %s", country, fileType, dir)
 
@@ -55,27 +61,60 @@ func startFileWatcher(dir string, country string, filePattern string, fileType s
 		log.Panicf("监控目录: %s 不存在或不是目录，请检查配置", dir)
 	}
 
+	// 事件通道：基础 1000 + 临时 500，长度不够时可容纳更多事件不丢
+	eventChannelSize := component.EventChannelBaseSize + component.EventChannelExtraSize
+	eventChannel := make(chan component.FileEvent, eventChannelSize)
+	log.Infof("事件通道已创建，容量: %d (基础 %d + 临时 %d)", eventChannelSize, component.EventChannelBaseSize, component.EventChannelExtraSize)
+
 	// 处理文件创建事件的包装函数，转换参数类型
 	handlerWrapper := func(filename string, additionalData interface{}) error {
 		return handler(filename, additionalData.(string))
 	}
 
-	// 创建FSWatcher配置
-	config := component.FSWatcherConfig{
-		Dir:            dir,
-		Operations:     component.Create, // 只监听创建事件
-		FilePattern:    filePattern,      // 文件匹配模式
-		WaitTime:       5,                // 等待5秒
-		MaxRetries:     10,               // 最多重试10次
-		MinFileSize:    100,              // 最小文件大小100字节
-		Handler:        handlerWrapper,   // 处理函数
-		AdditionalData: country,          // 传递申报国家信息
+	// 文件处理器配置：单队列按序消费（等可读 → 读 → 发）
+	processorConfig := component.FileProcessorConfig{
+		EventChannel:   eventChannel,
+		Handler:        handlerWrapper,
+		JobNoExtractor: component.ExtractBusinessKeyFromFileName, // 提取Job No，仅用于日志
+		WaitTime:       5,                                        // 文件写入完成等待时间
+		MaxRetries:     10,                                       // 最大重试次数
+		MinFileSize:    100,                                      // 文件最小大小100字节
 	}
 
-	watcher := component.NewFSWatcher(config)
+	// 创建并启动文件处理器
+	processor := component.NewFileProcessor(processorConfig)
+	processor.Start()
+
+	// 保存处理器引用（用于后续停止）
+	switch fileType {
+	case "XML":
+		if exportXmlProcessors == nil {
+			exportXmlProcessors = make(map[string]*component.FileProcessor)
+		}
+		exportXmlProcessors[country] = processor
+	case "税单":
+		if taxBillProcessors == nil {
+			taxBillProcessors = make(map[string]*component.FileProcessor)
+		}
+		taxBillProcessors[country] = processor
+	}
+
+	// 创建FSWatcher配置（使用事件通道模式）
+	watcherConfig := component.FSWatcherConfig{
+		Dir:            dir,
+		Operations:     component.Create, // 只监听创建事件
+		FilePattern:    filePattern,      // 文件后缀格式(如: .xml)匹配模式
+		EventChannel:   eventChannel,     // 使用事件通道（解耦模式）
+		AdditionalData: country,          // 传递申报国家信息
+		WatchSubdirs:   config.GlobalConfig.Watchers.WatchSubdirs,
+	}
+
+	watcher := component.NewFSWatcher(watcherConfig)
 	err := watcher.Start()
 	if err != nil {
 		log.Errorf("启动 %s 申报国家的%s文件监听失败: %v", country, fileType, err)
+	} else {
+		log.Infof("成功启动 %s 申报国家的%s文件监听（新架构：事件通道模式）", country, fileType)
 	}
 }
 

@@ -15,7 +15,7 @@ dist/
 /out/**
 
 # Project exclude paths
-*win.yaml
+*win-*.yaml
 *test.yaml
 
 file_structure_ncc.md
@@ -23,3 +23,6 @@ file_structure_ncc.md
 # Caddy
 Caddyfile-win
 Caddyfile-linux
+
+# build
+build/

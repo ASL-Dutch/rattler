@@ -4,13 +4,12 @@ This service provides access to BE and NL tax documents using Caddy as a web ser
 
 ## Configuration
 
-The service uses a Caddyfile to configure file serving with the following features:
+The service uses a Caddyfile to configure file serving with **dual-root** support:
 
-- Separate domains for BE and NL tax documents
-- Smart path handling for dated files (YYYYMM_filename.pdf)
-- Fallback to BE directory for files without date prefixes
-- Security features (Basic auth, security headers, logging)
-- Directory listing disabled
+- **Dated files**: URL `/YYYYMM_filename.pdf` → served from `backup-dir/YYYY/MM/YYYYMM_filename.pdf`
+- **Non-dated files**: URL `/filename.pdf` → served from the **original path** root (same as config `storage.*.tax-bill` or watch-dir), for historical flat files and (when `keep-original: true`) new files
+- Separate domains for BE and NL; each site has its own date root (backup-dir) and non-date root (original path)
+- Security headers, logging; directory listing disabled
 
 ## Getting Started
 
@@ -34,28 +33,15 @@ The service uses a Caddyfile to configure file serving with the following featur
 
 ## Access
 
-- BE tax documents: http://be.tax.documents.local/YYYYMM_filename.pdf
-  - Example: http://be.tax.documents.local/202505_test_tax_bill_01.pdf
-  - For non-dated files: http://be.tax.documents.local/test_tax_bill_01.pdf
+- **Dated**: `http://be.tax.local/202505_test_tax_bill_01.pdf` → file at `backup-dir/2025/05/202505_test_tax_bill_01.pdf`
+- **Non-dated**: `http://be.tax.local/old_file.pdf` → file at the **original path** root (e.g. `storage.be.tax-bill` or watch-dir)
 
-- NL tax documents: http://nl.tax.documents.local/YYYYMM_filename.pdf
-  - Example: http://nl.tax.documents.local/202505_test_tax_bill_01.pdf
-  - Non-dated files are searched in BE directory
+Same for NL: dated from backup-dir, non-dated from NL original path. This supports ASL-style deployments where many historical files remain in the flat original path.
 
 ## Directory Structure
 
-The tax documents are stored in the following structure:
-```
-out/backup/pdf/
-├── be/
-│   └── YYYY/
-│       └── MM/
-│           └── YYYYMM_filename.pdf
-└── nl/
-    └── YYYY/
-        └── MM/
-            └── YYYYMM_filename.pdf
-```
+- **Date root (backup-dir)**: `backup-dir/YYYY/MM/YYYYMM_filename.pdf`
+- **Non-date root (original path)**: flat files under `storage.*.tax-bill` or `watchers.pdf.*.watch-dir`
 
 ## Security Considerations
 

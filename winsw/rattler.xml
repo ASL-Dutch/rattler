@@ -1,8 +1,0 @@
-<service>
-    <id>RattlerService</id>
-    <name>RattlerService</name>
-    <description>Server for transferring customs documents with SoftPak</description>
-    <executable>..\rattler.exe</executable>
-    <arguments>--config ..\.rattler.yaml</arguments>
-    <logmode>reset</logmode>
-</service>
