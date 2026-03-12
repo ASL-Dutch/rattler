@@ -42,7 +42,7 @@ clean:
 # 将 Caddy、NSSM、项目二进制、config.yaml 模版 打包到 dist/rattler-deploy-windows-amd64/
 # 依赖: curl, unzip (macOS 自带)
 
-deploy-pack: deploy-clean build-windows deploy-pack-files
+deploy-pack: deploy-clean build-windows deploy-pack-files deploy-pack-zip
 	@echo ""
 	@echo "=== 部署包已生成 ==="
 	@echo "目录: $(DEPLOY_DIR)"
@@ -59,6 +59,11 @@ deploy-pack-files:
 	@cp DEPLOY.md $(DEPLOY_DIR)/DEPLOY.md
 	@cp CADDY_README.md $(DEPLOY_DIR)/CADDY_README.md
 	@echo "[deploy] rattler.exe, config.yaml, Caddyfile, 文档已复制"
+
+# 生成 zip
+deploy-pack-zip: deploy-pack
+	@echo "[deploy] 生成 zip"
+	zip -r $(DEPLOY_DIR).zip $(DEPLOY_DIR)
 
 # 清理部署包
 deploy-clean:

@@ -26,3 +26,6 @@ Caddyfile-linux
 
 # build
 build/
+
+# nssm
+nssm*
