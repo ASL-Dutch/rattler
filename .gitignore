@@ -10,9 +10,6 @@
 **dev**
 **.sum
 
-dist/
-/rattler
-/out/**
 
 # Project exclude paths
 .rattler-win.yaml
@@ -31,6 +28,10 @@ Caddyfile-linux
 
 # build
 build/
+dist/
+out/
 
-# nssm
-nssm*
+*.zip
+
+# docs
+docs/**

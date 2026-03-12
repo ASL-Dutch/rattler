@@ -1,71 +1,65 @@
-# Rattler Makefile - 交叉编译 Linux/Windows 64 位二进制与部署打包
+# Rattler Makefile — 编译与部署打包
 
-BINARY_NAME := rattler
+BINARY   := rattler
 BUILD_DIR := build
-DEPLOY_DIR := $(BUILD_DIR)/rattler-deploy-windows-amd64
-DEPLOY_CADDY_DIR := $(DEPLOY_DIR)/caddy
+DIST_DIR  := dist
+DEPLOY_PKG := rattler-deploy-windows-amd64
+DEPLOY_PATH := $(DIST_DIR)/$(DEPLOY_PKG)
+CADDY_PATH := $(DEPLOY_PATH)/caddy
 
+LDFLAGS  := -ldflags "-s -w"
 
-# Go 编译参数 (-s -w 减小二进制体积)
-LDFLAGS := -ldflags "-s -w"
+.PHONY: all build linux win cross clean pack clean-pack copy-deploy zip-deploy help
 
-.PHONY: all build build-linux build-windows build-all clean deploy-pack deploy-pack-caddy deploy-pack-nssm deploy-clean
-
-# 默认目标：编译当前平台
+# 默认：当前平台
 all: build
 
-# 编译当前平台
+help:
+	@echo "Rattler Makefile"
+	@echo "  make          / make build   — 编译当前平台 → $(BUILD_DIR)/"
+	@echo "  make linux    — Linux amd64 → $(BUILD_DIR)/$(BINARY)-linux-amd64"
+	@echo "  make win      — Windows amd64 → $(BUILD_DIR)/$(BINARY)-windows-amd64.exe"
+	@echo "  make cross    — 同时编译 linux + win"
+	@echo "  make pack     — 打 Windows 部署包 → $(DIST_DIR)/$(DEPLOY_PKG).zip"
+	@echo "  make clean    — 删除 $(BUILD_DIR)/ 与 $(DIST_DIR)/"
+
+# ——— 编译 ———
 build:
 	@mkdir -p $(BUILD_DIR)
-	go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) .
+	go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY) .
 
-# 编译 Linux 64 位 (amd64)
-build-linux:
+linux:
 	@mkdir -p $(BUILD_DIR)
-	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 .
+	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY)-linux-amd64 .
 
-# 编译 Windows 64 位 (amd64)
-build-windows:
+win:
 	@mkdir -p $(BUILD_DIR)
-	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe .
+	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY)-windows-amd64.exe .
 
-# 同时编译 Linux 和 Windows 64 位
-build-all: build-linux build-windows
-	@echo "Done. Binaries in $(BUILD_DIR)/:"
+cross: linux win
+	@echo "→ $(BUILD_DIR)/"
 	@ls -la $(BUILD_DIR)/
 
-# 清理编译产物
+# ——— 清理 ———
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD_DIR) $(DIST_DIR)
 
-# ========== 部署打包 ==========
-# 将 Caddy、NSSM、项目二进制、config.yaml 模版 打包到 dist/rattler-deploy-windows-amd64/
-# 依赖: curl, unzip (macOS 自带)
-
-deploy-pack: deploy-clean build-windows deploy-pack-files deploy-pack-zip
+# ——— 部署打包（Windows：二进制 + 配置 + Caddy + 文档） ———
+pack: clean-pack win copy-deploy zip-deploy
 	@echo ""
-	@echo "=== 部署包已生成 ==="
-	@echo "目录: $(DEPLOY_DIR)"
-	@echo "内容: rattler.exe, config.yaml, Caddyfile, caddy.exe, nssm.exe, DEPLOY.md, CADDY_README.md"
-	@ls -la $(DEPLOY_DIR)/
+	@echo "→ 部署包: $(DEPLOY_PATH).zip"
+	@ls -la $(DIST_DIR)/
 
-# 打包项目二进制与配置文件模版
-deploy-pack-files:
-	@mkdir -p $(DEPLOY_DIR)
-	@mkdir -p $(DEPLOY_CADDY_DIR)
-	@cp $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe $(DEPLOY_DIR)/rattler.exe
-	@cp config.yaml $(DEPLOY_DIR)/config.yaml
-	@cp Caddyfile $(DEPLOY_CADDY_DIR)/Caddyfile
-	@cp DEPLOY.md $(DEPLOY_DIR)/DEPLOY.md
-	@cp CADDY_README.md $(DEPLOY_DIR)/CADDY_README.md
-	@echo "[deploy] rattler.exe, config.yaml, Caddyfile, 文档已复制"
+clean-pack:
+	rm -rf $(DEPLOY_PATH) $(DEPLOY_PATH).zip
 
-# 生成 zip
-deploy-pack-zip: deploy-pack
-	@echo "[deploy] 生成 zip"
-	zip -r $(DEPLOY_DIR).zip $(DEPLOY_DIR)
+copy-deploy:
+	@mkdir -p $(DEPLOY_PATH) $(CADDY_PATH)
+	@cp $(BUILD_DIR)/$(BINARY)-windows-amd64.exe $(DEPLOY_PATH)/rattler.exe
+	@cp config.yaml $(DEPLOY_PATH)/config.yaml
+	@cp Caddyfile $(CADDY_PATH)/Caddyfile
+	@cp DEPLOY.md $(DEPLOY_PATH)/DEPLOY.md
+	@cp CADDY_README.md $(DEPLOY_PATH)/CADDY_README.md
 
-# 清理部署包
-deploy-clean:
-	@echo "[deploy] 清理部署包"
-	rm -rf $(DEPLOY_DIR)
+zip-deploy:
+	@cd $(DIST_DIR) && zip -r $(DEPLOY_PKG).zip $(DEPLOY_PKG)
