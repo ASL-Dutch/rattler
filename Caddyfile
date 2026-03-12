@@ -1,0 +1,70 @@
+# Caddyfile for Tax Document Service
+# 同时支持：按日期目录（YYYY/MM/YYYYMM_xxx.pdf）与不按日期目录（原路径平铺历史文件）
+# - 按日期：URL /202505_xxx.pdf → 在 backup-dir 下查找 2025/05/202505_xxx.pdf
+# - 不按日期：URL /任意文件名.pdf → 在「原路径」根目录下直接查找（ASL 等历史文件场景）
+# 原路径通常对应 config 中 storage.*.tax-bill 或 watchers.pdf.*.watch-dir（keep-original 为 true 时新文件也保留在此）
+{
+	admin off
+}
+
+# BE 税金单：双根 = 按日期(backup-dir) + 不按日期(原路径)
+be.tax.local:2015, https://be.tax.local {
+	log {
+		output file out/log/caddy/be-access.log
+		format json
+		level DEBUG
+	}
+
+	# 按日期：YYYYMM_ 前缀 → backup-dir/YYYY/MM/YYYYMM_xxx.pdf
+	@dated_files {
+		path_regexp dated_pattern ^/(20[0-9]{2})(0[1-9]|1[0-2])_(.*)$
+	}
+	handle @dated_files {
+		root * out/backup/pdf/be
+		rewrite * /{http.regexp.dated_pattern.1}/{http.regexp.dated_pattern.2}/{http.regexp.dated_pattern.1}{http.regexp.dated_pattern.2}_{http.regexp.dated_pattern.3}
+		file_server
+	}
+
+	# 不按日期：原路径根目录（平铺历史文件），与 config storage.be.tax-bill / watch-dir 对应
+	handle {
+		root * out/watch/pdf/be
+		file_server
+	}
+
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+		X-Frame-Options "SAMEORIGIN"
+	}
+}
+
+# NL 税金单：双根 = 按日期(backup-dir) + 不按日期(原路径)
+nl.tax.local:2015, https://nl.tax.local {
+	log {
+		output file out/log/caddy/nl-access.log
+		format json
+		level DEBUG
+	}
+
+	@dated_files {
+		path_regexp dated_pattern ^/(20[0-9]{2})(0[1-9]|1[0-2])_(.*)$
+	}
+	handle @dated_files {
+		root * out/backup/pdf/nl
+		rewrite * /{http.regexp.dated_pattern.1}/{http.regexp.dated_pattern.2}/{http.regexp.dated_pattern.1}{http.regexp.dated_pattern.2}_{http.regexp.dated_pattern.3}
+		file_server
+	}
+
+	handle {
+		root * out/watch/pdf/nl
+		file_server
+	}
+
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+		X-Frame-Options "SAMEORIGIN"
+	}
+}

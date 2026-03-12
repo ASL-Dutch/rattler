@@ -10,8 +10,6 @@
 **dev**
 **.sum
 
-
-
 dist/
 /rattler
 /out/**
@@ -21,9 +19,18 @@ dist/
 .rattler-test.yaml
 rattler-ncc-win.yaml
 rattler-win.yaml
+*win-*.yaml
+*test.yaml
 
 file_structure_ncc.md
 
-# Caddyfile
+# Caddy
 Caddyfile
 Caddyfile-win
+Caddyfile-linux
+
+# build
+build/
+
+# nssm
+nssm*

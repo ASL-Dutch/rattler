@@ -1,16 +1,20 @@
 /*
 Copyright © 2022 Joker
-
 */
 package cmd
 
 import (
 	"fmt"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"os"
-	"path/filepath"
-	"sysafari.com/softpak/rattler/config"
+	"sysafari.com/softpak/rattler/internal/config"
+	"sysafari.com/softpak/rattler/internal/web"
 )
 
 var cfgFile string
@@ -19,26 +23,62 @@ var cfgFile string
 var rootCmd = &cobra.Command{
 	Use:   "rattler",
 	Short: "SoftPak Client",
-	Long: `Rattler will simultaneously start the file server to access 
-the Export XML file and the tax bill file, and simultaneously start the 
-Import XML listener and the Export XML (NL|BE) file creation listener asynchronously. 
+	Long: `Rattler will simultaneously start the file server to access
+the Export XML file and the tax bill file, and simultaneously start the
+Import XML listener and the Export XML (NL|BE) file creation listener asynchronously.
 For example:`,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	Run: func(cmd *cobra.Command, args []string) {
-		// async start listen import xml queue
-		go ListenAmqpForImportXml()
+		// Initialize global configuration
+		// 包括：
+		// 1. 配置文件初始化
+		// 2. 日志初始化
+		// 3. 文件移动队列初始化
+		if err := config.InitConfig(); err != nil {
+			log.Fatalf("Failed to initialize configuration: %v", err)
+		}
 
-		// async start listen export xml directory(NL | BE)
-		go ListenExportXML("NL")
-		go ListenExportXML("BE")
+		// Initialize RabbitMQ
+		if err := InitRabbitMQ(); err != nil {
+			log.Fatalf("Failed to initialize RabbitMQ: %v", err)
+		}
 
-		// start remover to resend export xml
-		go RemoverWork()
+		// Start consumers
+		if err := StartMessageQueueConsumers(); err != nil {
+			log.Fatalf("Failed to start RabbitMQ consumers: %v", err)
+		}
+
+		// Setup graceful shutdown
+		setupGracefulShutdown()
+
+		// 开启Export XML文件监听
+		StartWatchExportXmlDirWorker()
+
+		// 开启税单文件监听
+		StartWatchTaxBillDirWorker()
+
 
 		// start file server
-		EchoRoutes()
+		web.StartServer()
 	},
+}
+
+// setupGracefulShutdown sets up signal handling for graceful shutdown
+func setupGracefulShutdown() {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-c
+		log.Info("Shutdown signal received, closing resources...")
+
+		// Close RabbitMQ connections gracefully
+		CloseRabbitMQ()
+
+		log.Info("All resources closed, shutting down")
+		os.Exit(0)
+	}()
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -90,14 +130,21 @@ func initConfig() {
 	}
 
 	initLog()
-
 }
 
 func initLog() {
 	path, _ := os.Executable()
 	_, exec := filepath.Split(path)
 	logFile := exec + ".log"
-	logFilePath := filepath.Join(viper.GetString("log.directory"), logFile)
+
+	// Use the config package global initialization function
+	// The actual initialization will happen in InitConfig() in the Run function
+	// This is just to ensure logging is set up early if needed before full config initialization
+	logDir := viper.GetString("log.directory")
+	if logDir == "" {
+		logDir = "out/log/"
+	}
+	logFilePath := filepath.Join(logDir, logFile)
 
 	config.InitLog(logFilePath, viper.GetString("log.level"))
 }
