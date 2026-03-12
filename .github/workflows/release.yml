@@ -32,9 +32,9 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
-      # go.sum 未纳入版本管理，仅通过 go.mod 拉取依赖
-      - name: Download dependencies
-        run: go mod download
+      # go.sum 未纳入版本管理，在 CI 中生成 go.sum 以通过构建校验
+      - name: Resolve dependencies
+        run: go mod tidy
 
       - name: Build
         env:
