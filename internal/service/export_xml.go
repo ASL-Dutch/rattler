@@ -3,8 +3,10 @@ package service
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,34 +41,23 @@ type ExportXmlInfo struct {
 // Compress the content of the XML file before sending,
 // and then create a json object and send it to the message queue
 func SendExportXml(filename string, declareCountry string) {
-
-	// 优先使用文件级别压缩
-	compressedXml, err := util.CompressXMLFile(filename)
+	content, err := readStableXMLContent(filename)
 	if err != nil {
-		log.Warnf("文件级压缩失败，尝试使用常规方法: %v", err)
-
-		// 如果文件级压缩失败，回退到常规方法
-		content, err := os.ReadFile(filename)
-		if err != nil {
-			log.Error("Read XML file error:", err)
-			return
-		}
-		compressedXml = util.AdvancedCompressXML(string(content))
+		log.Errorf("读取稳定XML文件失败，不发送MQ: %v", err)
+		return
 	}
+	compressedXml := util.AdvancedCompressXML(string(content))
 
 	// 获取原始文件大小用于对比
-	fileInfo, err := os.Stat(filename)
-	if err == nil {
-		originalSize := fileInfo.Size()
-		compressedSize := int64(len(compressedXml))
+	originalSize := int64(len(content))
+	compressedSize := int64(len(compressedXml))
 
-		// 记录压缩前后的大小差异
-		if originalSize > compressedSize {
-			log.Infof("XML压缩: 原始大小 %d 字节, 压缩后 %d 字节, 减少了 %.2f%%",
-				originalSize, compressedSize, float64(originalSize-compressedSize)*100/float64(originalSize))
-		} else {
-			log.Debugf("XML压缩: 无效果或增加了大小")
-		}
+	// 记录压缩前后的大小差异
+	if originalSize > compressedSize {
+		log.Infof("XML压缩: 原始大小 %d 字节, 压缩后 %d 字节, 减少了 %.2f%%",
+			originalSize, compressedSize, float64(originalSize-compressedSize)*100/float64(originalSize))
+	} else {
+		log.Debugf("XML压缩: 无效果或增加了大小")
 	}
 
 	log.Debugf("Min size xml content:  %s ", compressedXml)
@@ -95,6 +86,99 @@ func SendExportXml(filename string, declareCountry string) {
 		//jobNumber, _ := getJobNumber(filename)
 		// Send xml info to MQ
 		publishMessageToMQ(bf.String(), declareCountry)
+	}
+}
+
+// readStableXMLContent 读取已稳定且结构完整的XML内容，避免监听创建事件后读取到半文件
+func readStableXMLContent(filename string) ([]byte, error) {
+	maxAttempts := 0
+	checkIntervalMs := 0
+	var minContentSize int64
+	if config.GlobalConfig != nil {
+		maxAttempts = config.GlobalConfig.Watchers.Export.XMLReadiness.MaxAttempts
+		checkIntervalMs = config.GlobalConfig.Watchers.Export.XMLReadiness.CheckIntervalMs
+		minContentSize = config.GlobalConfig.Watchers.Export.XMLReadiness.MinContentSize
+	}
+
+	// 默认值兜底，避免未配置导致行为异常
+	if maxAttempts <= 0 {
+		maxAttempts = 8
+	}
+	if checkIntervalMs <= 0 {
+		checkIntervalMs = 1500
+	}
+	if minContentSize <= 0 {
+		minContentSize = 16
+	}
+
+	const (
+		stabilityRequiredHits = 1
+	)
+	checkInterval := time.Duration(checkIntervalMs) * time.Millisecond
+
+	var (
+		lastSize  int64 = -1
+		stableHit int
+		lastErr   error
+	)
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		content, err := os.ReadFile(filename)
+		if err != nil {
+			lastErr = err
+			log.Debugf("读取XML失败，等待重试(%d/%d): %s, err=%v", attempt, maxAttempts, filename, err)
+			time.Sleep(checkInterval)
+			continue
+		}
+
+		size := int64(len(content))
+		if size < minContentSize {
+			lastErr = fmt.Errorf("文件内容过小: %d", size)
+			log.Debugf("XML内容过小，等待重试(%d/%d): %s, size=%d", attempt, maxAttempts, filename, size)
+			time.Sleep(checkInterval)
+			continue
+		}
+
+		// 连续两次大小一致视为“写入稳定”，可显著降低读取半文件概率
+		if size == lastSize {
+			stableHit++
+		} else {
+			stableHit = 0
+			lastSize = size
+		}
+
+		if stableHit < stabilityRequiredHits {
+			time.Sleep(checkInterval)
+			continue
+		}
+
+		if !isWellFormedXML(content) {
+			lastErr = fmt.Errorf("XML结构尚未完整")
+			log.Debugf("XML结构不完整，等待重试(%d/%d): %s", attempt, maxAttempts, filename)
+			time.Sleep(checkInterval)
+			continue
+		}
+
+		return content, nil
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("文件在重试后仍未稳定")
+	}
+	return nil, fmt.Errorf("读取稳定XML失败: %s, err=%w", filename, lastErr)
+}
+
+// isWellFormedXML 判断XML是否可完整解析（只校验结构，不做业务字段校验）
+func isWellFormedXML(content []byte) bool {
+	decoder := xml.NewDecoder(bytes.NewReader(content))
+	for {
+		_, err := decoder.Token()
+		if err == io.EOF {
+			return true
+		}
+		if err != nil {
+			return false
+		}
 	}
 }
 

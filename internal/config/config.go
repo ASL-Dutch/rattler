@@ -104,11 +104,26 @@ type ExportWatchConfig struct {
 	// Enabled indicates whether Export watching is enabled
 	Enabled bool `mapstructure:"enabled"`
 
+	// XMLReadiness contains readiness-check config for export XML file reads
+	XMLReadiness ExportXMLReadinessConfig `mapstructure:"xml-readiness"`
+
 	// NL contains watch configuration for Netherlands
 	NL CountryWatchConfig `mapstructure:"nl"`
 
 	// BE contains watch configuration for Belgium
 	BE CountryWatchConfig `mapstructure:"be"`
+}
+
+// ExportXMLReadinessConfig contains readiness parameters for reading export XML files safely
+type ExportXMLReadinessConfig struct {
+	// MaxAttempts is the max retry count when waiting file readiness
+	MaxAttempts int `mapstructure:"max-attempts"`
+
+	// CheckIntervalMs is the interval in milliseconds between retries
+	CheckIntervalMs int `mapstructure:"check-interval-ms"`
+
+	// MinContentSize is the minimal content size(bytes) to consider as potentially valid
+	MinContentSize int64 `mapstructure:"min-content-size"`
 }
 
 // PdfWatchConfig contains PDF watch configuration

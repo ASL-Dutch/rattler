@@ -18,6 +18,14 @@ watchers:
   # XML(Export)监听配置 - 监控报关结果导出文件
   export:
     enabled: true # 是否启用Export监听功能
+    # Export XML 读文件就绪参数（防止创建事件触发时文件尚未写完）
+    xml-readiness:
+      # 最大重试次数（默认 8）
+      max-attempts: 8
+      # 每次重试间隔（毫秒，默认 1500）
+      check-interval-ms: 1500
+      # 最小内容大小（字节，默认 16）
+      min-content-size: 16
     nl:
       enabled: true # 是否启用荷兰(NL)导出文件监听
       watch-dir: out/watch/export/nl # 荷兰导出文件监听目录
