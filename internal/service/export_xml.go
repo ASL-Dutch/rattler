@@ -13,6 +13,7 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/net/html/charset"
 	"sysafari.com/softpak/rattler/internal/config"
 	"sysafari.com/softpak/rattler/internal/model"
 	"sysafari.com/softpak/rattler/internal/rabbit"
@@ -171,6 +172,9 @@ func readStableXMLContent(filename string) ([]byte, error) {
 // isWellFormedXML 判断XML是否可完整解析（只校验结构，不做业务字段校验）
 func isWellFormedXML(content []byte) bool {
 	decoder := xml.NewDecoder(bytes.NewReader(content))
+	decoder.CharsetReader = func(charsetName string, input io.Reader) (io.Reader, error) {
+		return charset.NewReaderLabel(charsetName, input)
+	}
 	for {
 		_, err := decoder.Token()
 		if err == io.EOF {

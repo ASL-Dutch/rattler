@@ -131,11 +131,29 @@ type PdfWatchConfig struct {
 	// Enabled indicates whether PDF watching is enabled
 	Enabled bool `mapstructure:"enabled"`
 
+	// TaxInfoPublish contains tax-bill parse and publish configuration
+	TaxInfoPublish TaxInfoPublishConfig `mapstructure:"tax-info-publish"`
+
 	// NL contains watch configuration for Netherlands
 	NL CountryWatchConfig `mapstructure:"nl"`
 
 	// BE contains watch configuration for Belgium
 	BE CountryWatchConfig `mapstructure:"be"`
+}
+
+// TaxInfoPublishConfig contains readiness and publish parameters for tax-bill PDF info
+type TaxInfoPublishConfig struct {
+	// Enabled indicates whether publishing parsed tax-bill info is enabled
+	Enabled bool `mapstructure:"enabled"`
+
+	// MaxAttempts is max retry count when waiting file readiness and parse success
+	MaxAttempts int `mapstructure:"max-attempts"`
+
+	// CheckIntervalMs is retry interval in milliseconds
+	CheckIntervalMs int `mapstructure:"check-interval-ms"`
+
+	// MinContentSize is minimal file size(bytes) to consider as potentially ready
+	MinContentSize int64 `mapstructure:"min-content-size"`
 }
 
 // WatchersConfig contains all watchers configuration
@@ -453,6 +471,11 @@ func (c *AppConfig) IsPdfWatcherEnabled(country string) bool {
 	} else {
 		return false
 	}
+}
+
+// IsTaxInfoPublishEnabled checks whether tax-bill parsed info publish is enabled
+func (c *AppConfig) IsTaxInfoPublishEnabled() bool {
+	return c.Watchers.Pdf.Enabled && c.Watchers.Pdf.TaxInfoPublish.Enabled
 }
 
 // IsKeepOriginalEnabled checks if keep original is enabled for a specific country

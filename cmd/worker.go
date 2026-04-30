@@ -42,6 +42,14 @@ func handleTaxBillCreateEvent(filename string, country string) error {
 		return fmt.Errorf("触发监听的文件不存在，请检查是否手动移除了此文件: %s", filename)
 	}
 
+	// 仅在配置启用时，等待税单文件生成完成并解析后发布到 Export MQ
+	if config.GlobalConfig.IsTaxInfoPublishEnabled() {
+		if err := service.SendTaxBillInfoToExportMQ(filename, country); err != nil {
+			log.Errorf("发布 %s 税金单解析信息失败: %v", filename, err)
+			return fmt.Errorf("发布 %s 税金单解析信息失败: %w", filename, err)
+		}
+	}
+
 	taxBillService := service.NewTaxBillService()
 	_, err := taxBillService.MoveTaxBillToBackup(filename, country)
 	if err != nil {
