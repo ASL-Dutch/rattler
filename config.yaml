@@ -38,6 +38,12 @@ watchers:
   # PDF(税金单)监听配置 - 监控税金单文件
   pdf:
     enabled: true # 是否启用PDF监听功能
+    # 税金单解析信息发布到 Export MQ 的配置
+    tax-info-publish:
+      enabled: true # 是否启用税金单解析信息发布
+      max-attempts: 8 # 文件就绪/解析重试次数
+      check-interval-ms: 1500 # 每次重试间隔（毫秒）
+      min-content-size: 1024 # 最小文件大小（字节）
     nl:
       enabled: true # 是否启用荷兰(NL)税金单监听
       keep-original: true # 是否在监听目录保留原始文件
