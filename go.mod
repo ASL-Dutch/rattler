@@ -1,6 +1,6 @@
 module sysafari.com/softpak/rattler
 
-go 1.25.0
+go 1.26.3
 
 require (
 	github.com/fsnotify/fsnotify v1.9.0
@@ -14,7 +14,7 @@ require (
 	github.com/streadway/amqp v1.1.0
 	github.com/swaggo/echo-swagger v1.4.1
 	github.com/swaggo/swag v1.16.4
-	golang.org/x/text v0.36.0
+	golang.org/x/net v0.52.0
 )
 
 require (
@@ -49,8 +49,8 @@ require (
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/crypto v0.50.0 // indirect
-	golang.org/x/net v0.52.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
+	golang.org/x/text v0.36.0 // indirect
 	golang.org/x/tools v0.43.0 // indirect
 	gopkg.in/go-playground/assert.v1 v1.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect

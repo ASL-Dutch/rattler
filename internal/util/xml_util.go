@@ -8,33 +8,19 @@ import (
 	"regexp"
 	"strings"
 
-	"golang.org/x/text/encoding"
-	"golang.org/x/text/encoding/charmap"
-	"golang.org/x/text/transform"
-
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/net/html/charset"
 )
 
-// 不同编码到Go编码转换器的映射
-var encodingMap = map[string]encoding.Encoding{
-	"ISO8859-1":    charmap.ISO8859_1,
-	"ISO-8859-1":   charmap.ISO8859_1,
-	"Windows-1252": charmap.Windows1252,
-}
-
-// CharsetReader 返回一个从指定字符集转换为UTF-8的Reader
-func CharsetReader(charset string, input io.Reader) (io.Reader, error) {
-	// 统一转为大写并去除特殊字符，便于匹配
-	charset = strings.ToUpper(charset)
-	charset = strings.Replace(charset, "-", "", -1)
-
-	if enc, ok := encodingMap[charset]; ok {
-		return transform.NewReader(input, enc.NewDecoder()), nil
+// CharsetReader 将 XML 声明中的字符集解码为 UTF-8，供 encoding/xml 使用。
+// 与 export_xml 等处的校验逻辑统一使用 golang.org/x/net/html/charset 标签解析。
+func CharsetReader(charsetLabel string, input io.Reader) (io.Reader, error) {
+	reader, err := charset.NewReaderLabel(charsetLabel, input)
+	if err != nil {
+		log.Warnf("未知字符集: %s，尝试直接处理: %v", charsetLabel, err)
+		return input, nil
 	}
-
-	// 如果没有找到匹配的编码，返回原始reader（假设是UTF-8）
-	log.Warnf("未知字符集: %s，尝试直接处理", charset)
-	return input, nil
+	return reader, nil
 }
 
 // CompressXML 压缩XML文档内容，去除不必要的空白字符

@@ -1,6 +1,7 @@
 package component
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,11 +29,17 @@ type FileProcessorConfig struct {
 	// JobNoExtractor 从文件名提取 job no，仅用于日志，不参与路由
 	JobNoExtractor func(filePath string) (string, error)
 
-	// WaitTime 等待文件写入完成的时间（秒）
+	// WaitTime 已废弃：请使用 PollIntervalMs；若 PollIntervalMs 未设置则按秒换算
 	WaitTime int
 
-	// MaxRetries 最大重试次数
+	// MaxRetries 最大轮询次数（写入完成检测）
 	MaxRetries int
+
+	// PollIntervalMs 每次 stat 间隔（毫秒）；未设置时由 WaitTime（秒）换算
+	PollIntervalMs int
+
+	// StabilityRequiredHits 连续多少次文件大小相同视为写入稳定（默认 2）
+	StabilityRequiredHits int
 
 	// MinFileSize 文件最小大小（字节）
 	MinFileSize int64
@@ -51,7 +58,16 @@ func NewFileProcessor(config FileProcessorConfig) *FileProcessor {
 		config.WaitTime = 5
 	}
 	if config.MaxRetries <= 0 {
-		config.MaxRetries = 10
+		config.MaxRetries = 40
+	}
+	if config.PollIntervalMs <= 0 {
+		config.PollIntervalMs = config.WaitTime * 1000
+		if config.PollIntervalMs <= 0 {
+			config.PollIntervalMs = 500
+		}
+	}
+	if config.StabilityRequiredHits <= 0 {
+		config.StabilityRequiredHits = 2
 	}
 	if config.MinFileSize <= 0 {
 		config.MinFileSize = 100
@@ -67,7 +83,7 @@ func NewFileProcessor(config FileProcessorConfig) *FileProcessor {
 
 // Start 启动文件处理器：单 goroutine 从统一队列按序消费
 func (fp *FileProcessor) Start() {
-	log.Info("文件处理器启动：单队列按创建顺序消费（等可读 → 读 → 发）")
+	log.Info("文件处理器启动：单队列按创建顺序消费（等写入稳定 → 读 → 发）")
 	fp.wg.Add(1)
 	go fp.consumeLoop()
 }
@@ -105,7 +121,7 @@ func (fp *FileProcessor) processOne(event FileEvent) {
 
 	canRead, err := fp.waitFileWriteFinish(event.FilePath)
 	if !canRead {
-		log.Warnf("文件不可读，跳过处理: %s, err=%v", event.FilePath, err)
+		log.Warnf("文件未就绪，跳过处理: %s, err=%v", event.FilePath, err)
 		return
 	}
 
@@ -131,51 +147,94 @@ func (fp *FileProcessor) logJobNo(filePath string) string {
 	return jobNo
 }
 
-// waitFileWriteFinish 等待文件可读（存在、大小满足、可打开）
+// waitFileWriteFinish 等待文件创建且内容写入完成：存在、达到最小大小、连续多次大小一致、可打开。
 func (fp *FileProcessor) waitFileWriteFinish(filename string) (bool, error) {
-	waitTime := time.Duration(fp.config.WaitTime) * time.Second
-	minSize := fp.config.MinFileSize
-	retries := fp.config.MaxRetries
+	opts := fileStabilityOptions{
+		maxAttempts:           fp.config.MaxRetries,
+		pollInterval:          time.Duration(fp.config.PollIntervalMs) * time.Millisecond,
+		stabilityRequiredHits: fp.config.StabilityRequiredHits,
+		minSize:               fp.config.MinFileSize,
+	}
+	return waitForFileStable(filename, opts)
+}
 
-	for retries > 0 {
-		retries--
+type fileStabilityOptions struct {
+	maxAttempts           int
+	pollInterval          time.Duration
+	stabilityRequiredHits int
+	minSize               int64
+}
 
+// waitForFileStable 轮询直到文件大小连续稳定且可打开，或超出尝试次数。
+func waitForFileStable(filename string, opts fileStabilityOptions) (bool, error) {
+	if opts.maxAttempts <= 0 {
+		opts.maxAttempts = 40
+	}
+	if opts.pollInterval <= 0 {
+		opts.pollInterval = 500 * time.Millisecond
+	}
+	if opts.stabilityRequiredHits <= 0 {
+		opts.stabilityRequiredHits = 2
+	}
+
+	var (
+		lastSize   int64 = -1
+		stableHits int
+		lastErr    error
+	)
+
+	for attempt := 1; attempt <= opts.maxAttempts; attempt++ {
 		info, err := os.Stat(filename)
 		if err != nil {
-			if retries == 0 {
-				log.Errorf("文件无法访问: %s, err=%v", filename, err)
-				return false, err
-			}
-			log.Debugf("文件可能仍在写入，%d 秒后重试: %s", fp.config.WaitTime, filename)
-			time.Sleep(waitTime)
+			lastErr = err
+			stableHits = 0
+			lastSize = -1
+			log.Debugf("文件可能仍在创建(%d/%d): %s, err=%v", attempt, opts.maxAttempts, filename, err)
+			time.Sleep(opts.pollInterval)
 			continue
 		}
 
-		if info.Size() < minSize {
-			if retries == 0 {
-				log.Warnf("文件大小不足，已达最大重试次数: %s, size=%d, min=%d", filename, info.Size(), minSize)
-				return true, nil
-			}
-			log.Debugf("文件大小不足，%d 秒后重试: %s, size=%d", fp.config.WaitTime, filename, info.Size())
-			time.Sleep(waitTime)
+		size := info.Size()
+		if size < opts.minSize {
+			lastErr = fmt.Errorf("file too small: %d < %d", size, opts.minSize)
+			stableHits = 0
+			lastSize = size
+			log.Debugf("文件大小不足(%d/%d): %s, size=%d", attempt, opts.maxAttempts, filename, size)
+			time.Sleep(opts.pollInterval)
+			continue
+		}
+
+		if size == lastSize {
+			stableHits++
+		} else {
+			stableHits = 1
+			lastSize = size
+		}
+
+		if stableHits < opts.stabilityRequiredHits {
+			log.Debugf("文件大小尚未稳定(%d/%d): %s, size=%d, stable=%d/%d",
+				attempt, opts.maxAttempts, filename, size, stableHits, opts.stabilityRequiredHits)
+			time.Sleep(opts.pollInterval)
 			continue
 		}
 
 		f, err := os.Open(filename)
 		if err != nil {
-			if retries == 0 {
-				log.Errorf("文件无法打开: %s, err=%v", filename, err)
-				return false, err
-			}
-			log.Debugf("文件可能被锁定，%d 秒后重试: %s", fp.config.WaitTime, filename)
-			time.Sleep(waitTime)
+			lastErr = err
+			stableHits = 0
+			log.Debugf("文件可能被锁定(%d/%d): %s, err=%v", attempt, opts.maxAttempts, filename, err)
+			time.Sleep(opts.pollInterval)
 			continue
 		}
-		f.Close()
+		_ = f.Close()
+		log.Debugf("文件写入已稳定(%d/%d): %s, size=%d", attempt, opts.maxAttempts, filename, size)
 		return true, nil
 	}
 
-	return false, nil
+	if lastErr == nil {
+		lastErr = fmt.Errorf("file not stable after %d attempts", opts.maxAttempts)
+	}
+	return false, lastErr
 }
 
 // ExtractBusinessKeyFromFileName 从文件名提取 job no（用于日志等）

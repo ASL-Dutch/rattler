@@ -15,6 +15,11 @@ tmp-dir: out/tmp
 # 监听任务配置
 watchers:
   watch-subdirs: false # 是否递归监听子目录，默认 false 仅监听目标目录，避免递归风险
+  # 监听层文件就绪：入队后、业务处理前，连续多次大小一致且可打开才继续
+  file-readiness:
+    max-attempts: 40 # 轮询上限（40 * 500ms ≈ 20s，可按现场写入速度调整）
+    poll-interval-ms: 500 # 每次检查间隔（毫秒）
+    stability-required-hits: 2 # 连续多少次大小相同视为稳定
   # XML(Export)监听配置 - 监控报关结果导出文件
   export:
     enabled: true # 是否启用Export监听功能

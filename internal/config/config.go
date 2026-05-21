@@ -156,10 +156,25 @@ type TaxInfoPublishConfig struct {
 	MinContentSize int64 `mapstructure:"min-content-size"`
 }
 
+// FileReadinessConfig 文件监听层「写入完成」检测参数（FileProcessor 在入队后、业务处理前使用）
+type FileReadinessConfig struct {
+	// MaxAttempts 轮询次数上限（默认 40）
+	MaxAttempts int `mapstructure:"max-attempts"`
+
+	// PollIntervalMs 每次 stat 间隔（毫秒，默认 500）
+	PollIntervalMs int `mapstructure:"poll-interval-ms"`
+
+	// StabilityRequiredHits 连续多少次文件大小相同视为写入稳定（默认 2）
+	StabilityRequiredHits int `mapstructure:"stability-required-hits"`
+}
+
 // WatchersConfig contains all watchers configuration
 type WatchersConfig struct {
 	// WatchSubdirs 是否递归监听子目录；默认 false，仅监听目标目录本身，避免递归风险
 	WatchSubdirs bool `mapstructure:"watch-subdirs"`
+
+	// FileReadiness 监听层文件就绪检测（与业务层 xml-readiness / tax-info-publish 互补）
+	FileReadiness FileReadinessConfig `mapstructure:"file-readiness"`
 
 	// Export contains Export (XML) watch configuration
 	Export ExportWatchConfig `mapstructure:"export"`

@@ -60,6 +60,55 @@ func handleTaxBillCreateEvent(filename string, country string) error {
 	return nil
 }
 
+// buildFileProcessorConfig 按文件类型组装监听层就绪检测参数（与 config watchers.file-readiness 对齐）
+func buildFileProcessorConfig(
+	eventChannel <-chan component.FileEvent,
+	handler component.HandlerFunc,
+	fileType string,
+) component.FileProcessorConfig {
+	cfg := config.GlobalConfig.Watchers
+	readiness := cfg.FileReadiness
+
+	maxAttempts := readiness.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = 40
+	}
+	pollIntervalMs := readiness.PollIntervalMs
+	if pollIntervalMs <= 0 {
+		pollIntervalMs = 500
+	}
+	stabilityHits := readiness.StabilityRequiredHits
+	if stabilityHits <= 0 {
+		stabilityHits = 2
+	}
+
+	minFileSize := int64(100)
+	switch fileType {
+	case "XML":
+		if s := cfg.Export.XMLReadiness.MinContentSize; s > 0 {
+			minFileSize = s
+		} else {
+			minFileSize = 16
+		}
+	case "税单":
+		if s := cfg.Pdf.TaxInfoPublish.MinContentSize; s > 0 {
+			minFileSize = s
+		} else {
+			minFileSize = 1024
+		}
+	}
+
+	return component.FileProcessorConfig{
+		EventChannel:          eventChannel,
+		Handler:               handler,
+		JobNoExtractor:        component.ExtractBusinessKeyFromFileName,
+		MaxRetries:            maxAttempts,
+		PollIntervalMs:        pollIntervalMs,
+		StabilityRequiredHits: stabilityHits,
+		MinFileSize:           minFileSize,
+	}
+}
+
 // 启动文件监听器（新架构：使用事件通道解耦监听和处理）
 func startFileWatcher(dir string, country string, filePattern string, fileType string, handler FileHandler) {
 	log.Infof("开始监控 %s 申报国家的%s文件目录: %s", country, fileType, dir)
@@ -79,15 +128,8 @@ func startFileWatcher(dir string, country string, filePattern string, fileType s
 		return handler(filename, additionalData.(string))
 	}
 
-	// 文件处理器配置：单队列按序消费（等可读 → 读 → 发）
-	processorConfig := component.FileProcessorConfig{
-		EventChannel:   eventChannel,
-		Handler:        handlerWrapper,
-		JobNoExtractor: component.ExtractBusinessKeyFromFileName, // 提取Job No，仅用于日志
-		WaitTime:       5,                                        // 文件写入完成等待时间
-		MaxRetries:     10,                                       // 最大重试次数
-		MinFileSize:    100,                                      // 文件最小大小100字节
-	}
+	// 文件处理器：入队后先等写入稳定，再进入业务（XML 校验 / PDF 解析）
+	processorConfig := buildFileProcessorConfig(eventChannel, handlerWrapper, fileType)
 
 	// 创建并启动文件处理器
 	processor := component.NewFileProcessor(processorConfig)

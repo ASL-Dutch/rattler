@@ -2,6 +2,7 @@ package util
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,17 +16,76 @@ import (
 	"github.com/ledongthuc/pdf"
 )
 
-// TaxPdfMededelingen 税金单 PDF 底部「Mededelingen」区块中的结构化字段（荷兰税单常见版式）。
+// TaxPdfMededelingen 税金单 PDF 解析结果（荷兰税单 Mededelingen 版式及 MQ 载荷）。
+// JSON 字段名与 jobNo 推导由 MarshalJSON 统一处理，勿依赖外部序列化工具函数。
 type TaxPdfMededelingen struct {
-	FileName        string // 税金单 PDF 文件名（filepath.Base(pdfPath)，含扩展名）
-	CustomsId       string // 报关/关务标识：取自 FileName 按下划线 _ 分割后的第一段（非 PDF 内容）
-	MessageType     string // 消息类型，如 CCTAXA
-	ContactOffice   string // 联系税务机关代码，如 NL000074
-	BankAccount     string // IBAN
-	Reference       string // 付款参考号
-	AmountRaw       string // 金额原文（欧洲小数格式，如 609,22）
-	AmountStandard  string // AmountRaw 转为小数点格式（无千分位），如 609.22；解析失败时为空
-	RawSectionText  string // 从「Mededelingen」到「EINDE」之间的原始文本，便于核对与调试
+	FileName       string // basename，含扩展名
+	JobNo          string // 可选；为空时 MarshalJSON 从 FileName 自动推导
+	ParseSuccess   bool   // Mededelingen 等业务字段是否解析成功
+	FailureReason  string // 解析失败时的原因说明
+	HandlingHint   string // 解析失败时的处理建议
+	MessageType    string // 如 CCTAXA
+	ContactOffice  string // 如 NL000074
+	BankAccount    string // IBAN
+	Reference      string // 付款参考号
+	AmountRaw      string // 欧洲小数格式原文
+	AmountStandard string // 标准小数点金额
+	RawSectionText string // Mededelingen 原始片段
+}
+
+// taxPdfMededelingenJSON MQ 载荷 JSON 形态（小写驼峰）。
+type taxPdfMededelingenJSON struct {
+	FileName       string `json:"fileName"`
+	JobNo          string `json:"jobNo"`
+	ParseSuccess   bool   `json:"parseSuccess"`
+	FailureReason  string `json:"failureReason,omitempty"`
+	HandlingHint   string `json:"handlingHint,omitempty"`
+	MessageType    string `json:"messageType,omitempty"`
+	ContactOffice  string `json:"contactOffice,omitempty"`
+	BankAccount    string `json:"bankAccount,omitempty"`
+	Reference      string `json:"reference,omitempty"`
+	AmountRaw      string `json:"amountRaw,omitempty"`
+	AmountStandard string `json:"amountStandard,omitempty"`
+	RawSectionText string `json:"rawSectionText,omitempty"`
+}
+
+// MarshalJSON 序列化为小写驼峰 JSON；jobNo 在输出时由 fileName 自动推导（若 JobNo 未显式设置）。
+func (t *TaxPdfMededelingen) MarshalJSON() ([]byte, error) {
+	if t == nil {
+		return []byte("null"), nil
+	}
+	payload := taxPdfMededelingenJSON{
+		FileName:       t.FileName,
+		JobNo:          t.resolvedJobNo(),
+		ParseSuccess:   t.ParseSuccess,
+		FailureReason:  t.FailureReason,
+		HandlingHint:   t.HandlingHint,
+	}
+	if t.ParseSuccess {
+		payload.MessageType = t.MessageType
+		payload.ContactOffice = t.ContactOffice
+		payload.BankAccount = t.BankAccount
+		payload.Reference = t.Reference
+		payload.AmountRaw = t.AmountRaw
+		payload.AmountStandard = t.AmountStandard
+		payload.RawSectionText = t.RawSectionText
+	}
+	return json.Marshal(payload)
+}
+
+// ResolvedJobNo 返回用于日志或业务展示的 jobNo（与 MarshalJSON 规则一致）。
+func (t *TaxPdfMededelingen) ResolvedJobNo() string {
+	if t == nil {
+		return ""
+	}
+	return t.resolvedJobNo()
+}
+
+func (t *TaxPdfMededelingen) resolvedJobNo() string {
+	if strings.TrimSpace(t.JobNo) != "" {
+		return strings.TrimSpace(t.JobNo)
+	}
+	return jobNoFromFileName(t.FileName)
 }
 
 var (
@@ -41,10 +101,7 @@ var (
 
 // ParseTaxPdfMededelingen 从税金单 PDF 文件路径解析底部 Mededelingen 区域。
 // 优先通过文本提取：自最后一页向前扫描包含「Mededelingen」的页面，避免整本大文档全量拼接。
-//
-// FileName 为 pdfPath 的 basename（含扩展名）；CustomsId 不来自 PDF 正文，由 FileName 按 '_' 取首段，
-// 规则见 CustomsId 字段注释。例如 BSIU9634507_18_1777524400792.PDF → FileName 同全名，CustomsId 为 BSIU9634507；
-// 若文件名中无 '_'，则 CustomsId 等于 FileName。
+// JobNo 始终从文件名解析，不依赖 PDF 正文。
 func ParseTaxPdfMededelingen(pdfPath string) (*TaxPdfMededelingen, error) {
 	if pdfPath == "" {
 		return nil, fmt.Errorf("pdf: empty path")
@@ -58,7 +115,9 @@ func ParseTaxPdfMededelingen(pdfPath string) (*TaxPdfMededelingen, error) {
 	}
 
 	fileName := filepath.Base(pdfPath)
-	customsID := customsIDFromFileName(fileName)
+	out := &TaxPdfMededelingen{
+		FileName: fileName,
+	}
 
 	r, err := openPDFReaderAtPath(pdfPath)
 	if err != nil {
@@ -75,11 +134,7 @@ func ParseTaxPdfMededelingen(pdfPath string) (*TaxPdfMededelingen, error) {
 		return nil, ErrMededelingenNotFound
 	}
 
-	out := &TaxPdfMededelingen{
-		FileName:        fileName,
-		CustomsId:       customsID,
-		RawSectionText:  strings.TrimSpace(block),
-	}
+	out.RawSectionText = strings.TrimSpace(block)
 	out.MessageType = valueAfterLabelUntil(block, "Bericht:", "Contact", "Bankrekening")
 	out.ContactOffice = valueAfterLabelUntil(block, "Contact kantoor:", "Bankrekening", "Referentie")
 	if ib := reBankrekeningNL.FindString(block); ib != "" {
@@ -93,16 +148,48 @@ func ParseTaxPdfMededelingen(pdfPath string) (*TaxPdfMededelingen, error) {
 		out.AmountStandard = std
 	}
 
+	out.ParseSuccess = true
 	return out, nil
 }
 
-// customsIDFromFileName 从税金单文件名（basename）提取 CustomsId：按下划线 _ 分割取第一段。
-func customsIDFromFileName(fileName string) string {
-	if i := strings.IndexByte(fileName, '_'); i >= 0 {
-		return fileName[:i]
+// jobNoFromFileName 从税金单文件名提取 Job No：取 basename（去扩展名）中最后一个 '-' 之后的段，并去掉高位补零。
+// 例如 DI-08-AI-2026-00440559.pdf → 00440559 → 440559。
+func jobNoFromFileName(fileName string) string {
+	base := fileName
+	if ext := filepath.Ext(fileName); ext != "" {
+		base = strings.TrimSuffix(fileName, ext)
 	}
-	return fileName
+	idx := strings.LastIndex(base, "-")
+	if idx < 0 || idx >= len(base)-1 {
+		if digitsOnly(base) {
+			return trimLeadingZerosJobSegment(base)
+		}
+		return base
+	}
+	return trimLeadingZerosJobSegment(base[idx+1:])
 }
+
+func trimLeadingZerosJobSegment(segment string) string {
+	trimmed := strings.TrimLeft(strings.TrimSpace(segment), "0")
+	if trimmed == "" {
+		return "0"
+	}
+	return trimmed
+}
+
+// MededelingenFailureReason 未找到 Mededelingen 区域时的标准原因说明。
+const MededelingenFailureReason = "PDF 正文中未找到 Mededelingen 区域，或无法从 PDF 提取该段文本"
+
+// MededelingenHandlingHint 未找到 Mededelingen 时的处理建议。
+const MededelingenHandlingHint = "请确认：(1) 文件已在监听目录完整生成（建议打开 PDF 查看末页是否含 Mededelingen 与 EINDE）；" +
+	"(2) 文件为荷兰标准税金单版式，而非运输单等其他 PDF；(3) 扫描件或无文本层的 PDF 无法自动解析，需人工补录或重新打印；" +
+	"(4) 若文件刚生成可等待片刻由系统重试，或修正源文件后重新放入监听目录"
+
+// PDFReadFailureReason PDF 无法打开或不是有效 PDF 时的原因说明。
+const PDFReadFailureReason = "无法打开或读取 PDF 文件（文件损坏、尚未写完或非 PDF 格式）"
+
+// PDFReadHandlingHint PDF 读取失败时的处理建议。
+const PDFReadHandlingHint = "请确认文件已完整写入监听目录且可正常用 PDF 阅读器打开；检查磁盘与权限；必要时重新导出税金单"
 
 // EuropeanAmountToStandard 将荷兰/欧洲常见金额字符串转为标准小数点形式（无千分位分隔符）。
 // 支持逗号为小数位：如 "609,22"、"1.234,56"；若已为 "609.22" 且小数部分最多两位也可识别。

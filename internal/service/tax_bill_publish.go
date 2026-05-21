@@ -3,8 +3,10 @@ package service
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -30,6 +32,7 @@ type TaxBillExportInfo struct {
 }
 
 // SendTaxBillInfoToExportMQ waits for PDF readiness, parses tax-bill info and publishes to export MQ.
+// Mededelingen 解析失败时仍发布消息（含 fileName、jobNo 及失败说明），以便下游感知并继续备份流程。
 func SendTaxBillInfoToExportMQ(pdfPath, declareCountry string) error {
 	declareCountry = strings.ToUpper(strings.TrimSpace(declareCountry))
 	info, err := readStableTaxBillInfo(pdfPath)
@@ -52,7 +55,12 @@ func SendTaxBillInfoToExportMQ(pdfPath, declareCountry string) error {
 	}
 
 	publishMessageToMQ(bf.String(), declareCountry)
-	log.Infof("税金单信息已发布到Export MQ: file=%s, country=%s", info.FileName, declareCountry)
+	if info.ParseSuccess {
+		log.Infof("税金单信息已发布到Export MQ: file=%s, jobNo=%s, country=%s", info.FileName, info.ResolvedJobNo(), declareCountry)
+	} else {
+		log.Warnf("税金单解析不完整仍发布MQ: file=%s, jobNo=%s, country=%s, reason=%s",
+			info.FileName, info.ResolvedJobNo(), declareCountry, info.FailureReason)
+	}
 	return nil
 }
 
@@ -61,7 +69,6 @@ func readStableTaxBillInfo(pdfPath string) (*util.TaxPdfMededelingen, error) {
 	checkIntervalMs := config.GlobalConfig.Watchers.Pdf.TaxInfoPublish.CheckIntervalMs
 	minContentSize := config.GlobalConfig.Watchers.Pdf.TaxInfoPublish.MinContentSize
 
-	// defaults
 	if maxAttempts <= 0 {
 		maxAttempts = 8
 	}
@@ -98,27 +105,57 @@ func readStableTaxBillInfo(pdfPath string) (*util.TaxPdfMededelingen, error) {
 		if st.Size() == lastSize {
 			stable++
 		} else {
-			stable = 0
+			stable = 1
 			lastSize = st.Size()
 		}
-		// require two consecutive same size observations
-		if stable < 1 {
+		const stabilityRequiredHits = 2
+		if stable < stabilityRequiredHits {
 			time.Sleep(checkInterval)
 			continue
 		}
 
 		info, err := util.ParseTaxPdfMededelingen(pdfPath)
-		if err != nil {
-			lastErr = err
-			log.Debugf("税金单解析失败，等待重试(%d/%d): %s, err=%v", attempt, maxAttempts, pdfPath, err)
-			time.Sleep(checkInterval)
-			continue
+		if err == nil {
+			return info, nil
 		}
-		return info, nil
+		lastErr = err
+		if !isRetriableTaxBillParseErr(err) {
+			return taxBillInfoAfterParseFailure(pdfPath, err), nil
+		}
+		log.Debugf("税金单解析失败，等待重试(%d/%d): %s, err=%v", attempt, maxAttempts, pdfPath, err)
+		time.Sleep(checkInterval)
 	}
 
+	if lastErr != nil && isRetriableTaxBillParseErr(lastErr) {
+		return taxBillInfoAfterParseFailure(pdfPath, lastErr), nil
+	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("tax-bill pdf was not ready after retries")
 	}
 	return nil, fmt.Errorf("读取并解析税金单失败: %s, err=%w", pdfPath, lastErr)
+}
+
+func isRetriableTaxBillParseErr(err error) bool {
+	return errors.Is(err, util.ErrMededelingenNotFound)
+}
+
+func taxBillInfoAfterParseFailure(pdfPath string, err error) *util.TaxPdfMededelingen {
+	reason, hint := taxBillParseFailureMeta(err)
+	return &util.TaxPdfMededelingen{
+		FileName:      filepath.Base(pdfPath),
+		ParseSuccess:  false,
+		FailureReason: reason,
+		HandlingHint:  hint,
+	}
+}
+
+func taxBillParseFailureMeta(err error) (reason, hint string) {
+	switch {
+	case errors.Is(err, util.ErrMededelingenNotFound):
+		return util.MededelingenFailureReason, util.MededelingenHandlingHint
+	case errors.Is(err, util.ErrNotPDF):
+		return util.PDFReadFailureReason, util.PDFReadHandlingHint
+	default:
+		return fmt.Sprintf("税金单 PDF 解析失败: %v", err), util.MededelingenHandlingHint
+	}
 }

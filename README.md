@@ -54,7 +54,7 @@ Rattler 是与 SoftPak 报关软件协同工作的中间件，负责**报关文�
 ┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
 │  FSWatcher      │     │  统一事件队列         │     │  FileProcessor  │
 │  监听目录       │ ──► │  EventChannel        │ ──► │  单消费者       │
-│  仅入队，不处理 │     │  (1000+500 缓冲)      │     │  等可读→读→发   │
+│  仅入队，不处理 │     │  (1000+500 缓冲)      │     │  等稳定→业务处理 │
 └─────────────────┘     └──────────────────────┘     └─────────────────┘
 ```
 
@@ -64,10 +64,120 @@ Rattler 是与 SoftPak 报关软件协同工作的中间件，负责**报关文�
 
 2. **第二步：按序消费队列**
    - 单消费者从队列 **FIFO** 取事件。
-   - 对每条事件**同步**执行：等待文件可读 → 读取内容 → 调用业务（发 MQ、备份等）。
+   - 对每条事件**同步**执行：**监听层就绪检测**（`file-readiness`：连续多次大小一致且可打开）→ 业务处理（读文件、发 MQ、提交备份等）。
    - 同一报关单的多个文件按入队顺序依次处理，等价于按创建顺序。
 
-### 2.3 其他设计要点
+3. **第三步：业务层二次校验（Export XML / 税金单解析）**
+   - Export XML：`xml-readiness` 再次等待大小稳定，并用 `isWellFormedXML` 校验结构完整后再发 MQ。
+   - 税金单（可选）：`tax-info-publish` 再次等待并解析 PDF 底部 `Mededelingen`，成功后发 MQ。
+
+### 2.3 Export XML 与税金单处理时序
+
+以下时序图描述 **NL/BE 各自独立** 的 `FSWatcher` + `FileProcessor` 实例；仅展示 Create 事件触发的写文件 → 处理主路径。
+
+#### 2.3.1 Export XML
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant SP as SoftPak
+    participant Dir as watch-dir<br/>(export XML)
+    participant FS as FSWatcher
+    participant Q as EventChannel<br/>(FIFO)
+    participant FP as FileProcessor
+    participant H as handleExportXmlCreateEvent
+    participant S as SendExportXml
+    participant MQ as RabbitMQ<br/>(export 队列)
+    participant FM as file-mover 队列
+
+    SP->>Dir: 创建 *.xml
+    Dir-->>FS: fsnotify Create
+    FS->>FS: 匹配后缀 / 模式
+    FS->>Q: FileEvent 入队（仅入队，不读文件）
+
+    Q->>FP: 取出事件（单消费者）
+    loop watchers.file-readiness
+        FP->>Dir: Stat / Open 轮询
+        Note over FP,Dir: 达到 min 大小且<br/>连续 N 次大小相同
+    end
+    alt 未就绪
+        FP-->>FP: 记录 warn，跳过该文件
+    else 已就绪
+        FP->>H: Handler(filename, country)
+        H->>S: SendExportXml
+        loop watchers.export.xml-readiness
+            S->>Dir: ReadFile + 大小稳定检测
+            S->>S: isWellFormedXML
+        end
+        alt XML 不稳定或结构不完整
+            S-->>S: 记录 error，不发送 MQ
+        else 读取成功
+            S->>S: AdvancedCompressXML
+            S->>FM: PublishFileMover（异步备份）
+            S->>MQ: publishMessageToMQ(JSON)
+        end
+    end
+```
+
+#### 2.3.2 税金单（PDF）
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant SP as SoftPak
+    participant Dir as watch-dir<br/>(tax PDF)
+    participant FS as FSWatcher
+    participant Q as EventChannel<br/>(FIFO)
+    participant FP as FileProcessor
+    participant H as handleTaxBillCreateEvent
+    participant P as SendTaxBillInfoToExportMQ
+    participant U as ParseTaxPdfMededelingen
+    participant MQ as RabbitMQ<br/>(export 队列)
+    participant TB as TaxBillService
+    participant FM as file-mover 队列
+
+    SP->>Dir: 创建 *.pdf
+    Dir-->>FS: fsnotify Create
+    FS->>FS: 匹配 PDF 模式
+    FS->>Q: FileEvent 入队
+
+    Q->>FP: 取出事件
+    loop watchers.file-readiness
+        FP->>Dir: Stat / Open 轮询
+        Note over FP,Dir: min 默认 1024B<br/>连续 N 次大小相同
+    end
+    alt 未就绪
+        FP-->>FP: 记录 warn，跳过
+    else 已就绪
+        FP->>H: Handler(filename, country)
+        opt tax-info-publish.enabled
+            H->>P: SendTaxBillInfoToExportMQ
+            loop watchers.pdf.tax-info-publish
+                P->>Dir: Stat 大小稳定
+                P->>U: ParseTaxPdfMededelingen
+            end
+            alt 解析失败
+                P-->>H: 返回 error（不备份）
+                H-->>H: 记录 error
+            else 解析成功
+                P->>MQ: publishMessageToMQ<br/>(type=TAX_BILL_INFO)
+            end
+        end
+        H->>TB: MoveTaxBillToBackup
+        TB->>FM: PublishFileMover<br/>(YYYY/MM 归档，可选 keep-original 复制)
+    end
+```
+
+**说明**
+
+| 阶段 | 配置项 | 作用 |
+| ---- | ------ | ---- |
+| 监听层就绪 | `watchers.file-readiness` | 入队后、进业务前：防半文件 |
+| Export 读取 | `watchers.export.xml-readiness` | 二次稳定 + XML 结构校验 |
+| 税金单解析 | `watchers.pdf.tax-info-publish` | 二次稳定 + PDF `Mededelingen` 解析后发 MQ |
+| 文件归档 | `file-mover` | Export / 税金单备份均为异步移动，不阻塞监听消费 |
+
+### 2.4 其他设计要点
 
 - **文件移动异步化**：所有「移动/复制」操作通过 `file-mover` 队列异步执行，避免高并发时阻塞主流程。
 - **税金单按日期归档**：备份路径为 `backup-dir/YYYY/MM/`，文件名可带 `YYYYMM_` 前缀，便于 Caddy 按日期路径提供静态访问。
@@ -80,8 +190,8 @@ Rattler 是与 SoftPak 报关软件协同工作的中间件，负责**报关文�
 ### 3.1 监听与发送（Export）
 
 - 监听 NL/BE 的 Export XML 监听目录（`watchers.export.nl/be.watch-dir`）。
-- 文件就绪后读取内容，发送到 RabbitMQ 导出交换机/队列（`rabbitmq.export`）。
-- 处理后可按业务将文件备份到 `backup-dir`（若在业务逻辑中实现）。
+- 流程见 [2.3.1 Export XML 时序](#231-export-xml)：监听层 `file-readiness` → `readStableXMLContent` → 压缩 → 发 MQ → 异步备份。
+- 发送到 RabbitMQ 导出交换机/队列（`rabbitmq.export`）。
 
 ### 3.2 接收与落盘（Import）
 
@@ -91,7 +201,8 @@ Rattler 是与 SoftPak 报关软件协同工作的中间件，负责**报关文�
 ### 3.3 税金单（PDF）监听与归档
 
 - 监听 NL/BE 税金单 PDF 目录（`watchers.pdf.nl/be.watch-dir`）。
-- 文件就绪后通过 `file-mover` 队列移动到备份目录 `backup-dir/YYYY/MM/`，文件名可带 `YYYYMM_` 前缀。
+- 流程见 [2.3.2 税金单（PDF）时序](#232-税金单pdf)：监听层就绪 →（可选）解析发 MQ → 异步归档。
+- 通过 `file-mover` 队列移动到备份目录 `backup-dir/YYYY/MM/`，文件名可带 `YYYYMM_` 前缀。
 - 可配置 `keep-original: true` 在监听目录保留原文件（即复制一份到备份）。
 
 ### 3.4 HTTP 文件下载 API
@@ -136,7 +247,21 @@ Rattler 是与 SoftPak 报关软件协同工作的中间件，负责**报关文�
 | ------------------------ | ---- | ------------------------------------------------------ |
 | `watchers.watch-subdirs` | bool | 是否递归监听子目录，默认 `false`，仅监听配置的目录本身 |
 
+**监听层文件就绪（Export / PDF 共用）**
+
+| 参数                                          | 类型 | 说明                                       |
+| --------------------------------------------- | ---- | ------------------------------------------ |
+| `watchers.file-readiness.max-attempts`        | int  | FileProcessor 轮询上限，默认 40            |
+| `watchers.file-readiness.poll-interval-ms`    | int  | 轮询间隔（毫秒），默认 500                 |
+| `watchers.file-readiness.stability-required-hits` | int | 连续多少次大小相同视为稳定，默认 2     |
+
 **Export（XML）**
+
+| 参数                                          | 类型 | 说明                                       |
+| --------------------------------------------- | ---- | ------------------------------------------ |
+| `watchers.export.xml-readiness.max-attempts`  | int  | 业务层读取重试次数，默认 8                 |
+| `watchers.export.xml-readiness.check-interval-ms` | int | 重试间隔（毫秒），默认 1500              |
+| `watchers.export.xml-readiness.min-content-size` | int | 最小内容大小（字节），默认 16           |
 
 | 参数                            | 类型   | 说明                   |
 | ------------------------------- | ------ | ---------------------- |
@@ -149,6 +274,13 @@ Rattler 是与 SoftPak 报关软件协同工作的中间件，负责**报关文�
 | `watchers.export.be.backup-dir` | string | 比利时 Export 备份目录 |
 
 **PDF（税金单）**
+
+| 参数                                          | 类型 | 说明                                       |
+| --------------------------------------------- | ---- | ------------------------------------------ |
+| `watchers.pdf.tax-info-publish.enabled`       | bool | 是否解析税金单并发布到 Export MQ           |
+| `watchers.pdf.tax-info-publish.max-attempts`  | int  | 解析前就绪/重试次数，默认 8                |
+| `watchers.pdf.tax-info-publish.check-interval-ms` | int | 重试间隔（毫秒），默认 1500              |
+| `watchers.pdf.tax-info-publish.min-content-size` | int | 最小 PDF 大小（字节），默认 1024          |
 
 | 参数                            | 类型   | 说明                                                                                                                                         |
 | ------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
