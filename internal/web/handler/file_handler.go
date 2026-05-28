@@ -42,7 +42,6 @@ func DownloadTaxPdf(c echo.Context) error {
 	taxBillService := service.NewTaxBillService()
 	filePath, err := taxBillService.FindTaxBillFile(origin, dc)
 	if err != nil {
-		log.Errorf("Download tax-bill pdf failed, %s: %v", origin, err)
 		return c.String(http.StatusNotFound,
 			fmt.Sprintf("Download tax-bill pdf failed, %s is not found.", origin))
 	}

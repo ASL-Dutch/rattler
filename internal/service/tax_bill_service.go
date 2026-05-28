@@ -84,6 +84,59 @@ type taxBillLookupRoots struct {
 	backup   string
 }
 
+type taxBillLookupAttempt struct {
+	dir        string
+	lookupName string
+	note       string
+	found      bool
+	resolved   string
+}
+
+type taxBillDownloadLookupTrace struct {
+	country     string
+	requestFile string
+	originalDir string
+	backupDir   string
+	attempts    []taxBillLookupAttempt
+}
+
+func (t *taxBillDownloadLookupTrace) addAttempt(dir, lookupName, note string) *taxBillLookupAttempt {
+	att := taxBillLookupAttempt{dir: dir, lookupName: lookupName, note: note}
+	t.attempts = append(t.attempts, att)
+	return &t.attempts[len(t.attempts)-1]
+}
+
+func logTaxBillDownloadLookup(trace taxBillDownloadLookupTrace, resolvedPath string, findErr error) {
+	var parts []string
+	for _, a := range trace.attempts {
+		status := "未命中"
+		if a.found {
+			status = "命中->" + a.resolved
+		}
+		dir := a.dir
+		if dir == "" {
+			dir = "(未配置)"
+		}
+		part := fmt.Sprintf("dir=%s lookup=%s %s", dir, a.lookupName, status)
+		if a.note != "" {
+			part += " (" + a.note + ")"
+		}
+		parts = append(parts, part)
+	}
+	attempts := strings.Join(parts, "; ")
+	if findErr != nil {
+		log.Warnf(
+			"税金单下载查找失败: country=%s file=%s originalDir=%s backupDir=%s resolved= attempts=[%s] err=%v",
+			trace.country, trace.requestFile, trace.originalDir, trace.backupDir, attempts, findErr,
+		)
+		return
+	}
+	log.Infof(
+		"税金单下载查找成功: country=%s file=%s originalDir=%s backupDir=%s resolved=%s attempts=[%s]",
+		trace.country, trace.requestFile, trace.originalDir, trace.backupDir, resolvedPath, attempts,
+	)
+}
+
 // FindTaxBillFile 按文件名解析税金单物理路径（仅使用 storage.tax-bill-original / tax-bill-backup）。
 //
 // 规则：
@@ -100,19 +153,30 @@ func (s *TaxBillService) FindTaxBillFile(filename, country string) (string, erro
 		return "", err
 	}
 
-	var searched []string
-	tryLookup := func(lookupName, dir string) (string, bool) {
-		if dir == "" || lookupName == "" {
-			return "", false
+	trace := taxBillDownloadLookupTrace{
+		country:     country,
+		requestFile: filename,
+		originalDir: roots.original,
+		backupDir:   roots.backup,
+	}
+
+	var resolved string
+	tryLookup := func(lookupName, dir, note string) bool {
+		if lookupName == "" {
+			return false
 		}
-		label := dir + " as " + lookupName
-		searched = append(searched, label)
+		att := trace.addAttempt(dir, lookupName, note)
+		if dir == "" {
+			return false
+		}
 		path, err := s.findFileInDirectory(lookupName, dir)
 		if err != nil {
-			return "", false
+			return false
 		}
-		log.Debugf("税金单定位成功: request=%s lookup=%s path=%s", filename, lookupName, path)
-		return path, true
+		att.found = true
+		att.resolved = path
+		resolved = path
+		return true
 	}
 
 	if year, month, ok := util.ParseTaxBillBackupPrefix(filename); ok {
@@ -120,31 +184,41 @@ func (s *TaxBillService) FindTaxBillFile(filename, country string) (string, erro
 		lookups := []struct {
 			name string
 			dir  string
+			note string
 		}{
-			{filename, filepath.Join(roots.backup, year, month)},
-			{unprefixed, roots.original},
-			{filename, roots.original},
-			{filename, roots.backup},
+			{filename, filepath.Join(roots.backup, year, month), "backup-dated"},
+			{unprefixed, roots.original, "original-unprefixed"},
+			{filename, roots.original, "original-prefixed"},
+			{filename, roots.backup, "backup-root"},
 		}
 		for _, item := range lookups {
-			if path, found := tryLookup(item.name, item.dir); found {
-				return path, nil
+			if tryLookup(item.name, item.dir, item.note) {
+				logTaxBillDownloadLookup(trace, resolved, nil)
+				return resolved, nil
 			}
 		}
 	} else {
-		if path, found := tryLookup(filename, roots.original); found {
-			return path, nil
+		if tryLookup(filename, roots.original, "original") {
+			logTaxBillDownloadLookup(trace, resolved, nil)
+			return resolved, nil
 		}
+		att := trace.addAttempt(roots.backup, filename, "backup-tree-glob")
 		if path, err := s.findBackedUpCopyByOriginalName(roots.backup, filename); err == nil {
-			log.Debugf("税金单按原始名在备份树中定位: file=%s path=%s", filename, path)
-			return path, nil
+			att.found = true
+			att.resolved = path
+			resolved = path
+			logTaxBillDownloadLookup(trace, resolved, nil)
+			return resolved, nil
 		}
-		if path, found := tryLookup(filename, roots.backup); found {
-			return path, nil
+		if tryLookup(filename, roots.backup, "backup-root") {
+			logTaxBillDownloadLookup(trace, resolved, nil)
+			return resolved, nil
 		}
 	}
 
-	return "", fmt.Errorf("未找到税金单文件 %s（已查找: %s）", filename, strings.Join(searched, "; "))
+	findErr := fmt.Errorf("未找到税金单文件 %s", filename)
+	logTaxBillDownloadLookup(trace, "", findErr)
+	return "", findErr
 }
 
 func (s *TaxBillService) resolveTaxBillLookupRoots(country string) (taxBillLookupRoots, error) {

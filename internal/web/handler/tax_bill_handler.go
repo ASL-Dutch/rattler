@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
-	log "github.com/sirupsen/logrus"
 	"sysafari.com/softpak/rattler/internal/model"
 	"sysafari.com/softpak/rattler/internal/service"
 )
@@ -62,17 +61,13 @@ func (h *TaxBillHandler) DownloadTaxBill(c echo.Context) error {
 		})
 	}
 
-	// 使用服务层方法查找文件
 	filePath, err := h.taxBillService.FindTaxBillFile(filename, country)
 	if err != nil {
-		log.Errorf("查找税金单文件失败: %v", err)
 		return c.JSON(http.StatusNotFound, &model.ResponseError{
 			Status: model.FAIL,
 			Errors: []string{err.Error()},
 		})
 	}
-
-	log.Infof("下载税金单文件: %s", filePath)
 
 	// 设置响应头，指定文件类型
 	if strings.HasSuffix(strings.ToLower(filename), ".pdf") {
