@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 	log "github.com/sirupsen/logrus"
 	"sysafari.com/softpak/rattler/internal/config"
+	"sysafari.com/softpak/rattler/internal/service"
 	"sysafari.com/softpak/rattler/internal/util"
 )
 
@@ -38,24 +39,15 @@ func DownloadTaxPdf(c echo.Context) error {
 		dc = "NL" // 默认为NL
 	}
 
-	// 使用配置对象获取路径
-	var filePath string
-	taxBillDir := config.GlobalConfig.GetStorageTaxBillDir(dc)
-	if taxBillDir == "" {
+	taxBillService := service.NewTaxBillService()
+	filePath, err := taxBillService.FindTaxBillFile(origin, dc)
+	if err != nil {
+		log.Errorf("Download tax-bill pdf failed, %s: %v", origin, err)
 		return c.String(http.StatusNotFound,
-			fmt.Sprintf("未配置申报国家 %s 的税单目录", dc))
+			fmt.Sprintf("Download tax-bill pdf failed, %s is not found.", origin))
 	}
 
-	filePath = filepath.Join(taxBillDir, origin)
-
-	if util.IsExists(filePath) {
-		return c.Attachment(filePath, target)
-	}
-
-	log.Errorf("Download tax-bill pdf failed,%s is not found", filePath)
-
-	return c.String(http.StatusNotFound,
-		fmt.Sprintf("Download tax-bill pdf failed,%s is not found.", origin))
+	return c.Attachment(filePath, target)
 }
 
 // DownloadExportXml Download the export XML file

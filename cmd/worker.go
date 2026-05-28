@@ -35,25 +35,22 @@ func handleExportXmlCreateEvent(filename string, country string) error {
 
 // 处理税单创建事件
 func handleTaxBillCreateEvent(filename string, country string) error {
-	if !util.IsProcessableTaxBillFileName(filename) {
-		log.Infof("税金单文件不在处理范围（文件名须包含 %s），仅记录不处理: country=%s, file=%s",
-			util.TaxBillProcessableMarker, country, filename)
-		return component.ErrFileSkipped
-	}
-
-	log.Infof("处理 %s 税单文件: %s", country, filename)
-
 	if !util.IsExists(filename) {
 		log.Errorf("触发监听的文件不存在，请检查是否手动移除了此文件: %s", filename)
 		return fmt.Errorf("触发监听的文件不存在，请检查是否手动移除了此文件: %s", filename)
 	}
 
-	// 仅在配置启用时，等待税单文件生成完成并解析后发布到 Export MQ
-	if config.GlobalConfig.IsTaxInfoPublishEnabled() {
-		if err := service.SendTaxBillInfoToExportMQ(filename, country); err != nil {
-			log.Errorf("发布 %s 税金单解析信息失败: %v", filename, err)
-			return fmt.Errorf("发布 %s 税金单解析信息失败: %w", filename, err)
+	// 文件名包含 DI-18 表示需解析 Mededelingen 并发布 MQ；其余 PDF 仅备份，不解析内容。
+	if util.IsProcessableTaxBillFileName(filename) {
+		log.Infof("处理 %s 税单文件（解析并备份）: %s", country, filename)
+		if config.GlobalConfig.IsTaxInfoPublishEnabled() {
+			if err := service.SendTaxBillInfoToExportMQ(filename, country); err != nil {
+				log.Errorf("发布 %s 税金单解析信息失败: %v", filename, err)
+				return fmt.Errorf("发布 %s 税金单解析信息失败: %w", filename, err)
+			}
 		}
+	} else {
+		log.Infof("非 DI-18 税金单 PDF，跳过解析与 MQ 发布，仅备份: country=%s, file=%s", country, filename)
 	}
 
 	taxBillService := service.NewTaxBillService()

@@ -3,7 +3,7 @@ package service
 import (
 	"fmt"
 	"path/filepath"
-	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -78,45 +78,131 @@ func (s *TaxBillService) MoveTaxBillToBackup(filePath, country string) (string, 
 	return fileName, nil
 }
 
-// FindTaxBillFile 查找税金单文件
-// 如果文件名有yyyyMM_前缀，则在备份路径/yyyy/MM/目录下查找
-// 如果没有前缀，则在备份路径根目录下查找，但不遍历子目录
+// taxBillLookupRoots 税金单 Web 访问用的目录根：original 为监听/历史平铺目录，backup 为按 yyyy/mm 归档的备份根。
+type taxBillLookupRoots struct {
+	original string
+	backup   string
+}
+
+// FindTaxBillFile 按文件名解析税金单物理路径，兼容监听备份前后两种命名方式。
+//
+// 规则：
+//   - 文件名含 yyyyMM_ 前缀（备份命名）：优先 backupDir/yyyy/mm/；其次 original 平铺（重放监听场景）。
+//   - 无前缀（原始命名）：优先 original 监听目录（上线监听备份前的历史文件）；其次在 backup 树中匹配 *_原始名。
 func (s *TaxBillService) FindTaxBillFile(filename, country string) (string, error) {
-	// 检查参数
 	if filename == "" || country == "" {
 		return "", fmt.Errorf("文件名和国家代码不能为空")
 	}
+	filename = util.NormalizeTaxBillFileName(filename)
 
-	// 获取税金单备份目录
-	backupDir := config.GlobalConfig.GetTaxBillDir(country)
-	if backupDir == "" {
-		return "", fmt.Errorf("国家 %s 的税金单备份目录未配置", country)
+	roots, err := s.resolveTaxBillLookupRoots(country)
+	if err != nil {
+		return "", err
 	}
 
-	// 检查文件名是否有yyyyMM_前缀（使用正则表达式更精确地匹配）
-	prefixRegex := regexp.MustCompile(`^(20\d{2})(0[1-9]|1[0-2])_`)
-	matches := prefixRegex.FindStringSubmatch(filename)
+	var searched []string
+	tryDir := func(dir string) (string, bool) {
+		if dir == "" {
+			return "", false
+		}
+		searched = append(searched, dir)
+		path, err := s.findFileInDirectory(filename, dir)
+		if err != nil {
+			return "", false
+		}
+		log.Debugf("税金单定位成功: file=%s path=%s dir=%s", filename, path, dir)
+		return path, true
+	}
 
-	// 根据是否有前缀决定查找位置
-	if len(matches) > 0 {
-		// 提取年份和月份
-		year := matches[1]  // 第一个捕获组 (20\d{2})
-		month := matches[2] // 第二个捕获组 (0[1-9]|1[0-2])
-
-		return s.findFileInDirectory(filename, filepath.Join(backupDir, year, month))
+	if year, month, ok := util.ParseTaxBillBackupPrefix(filename); ok {
+		for _, dir := range uniqueNonEmptyDirs(
+			filepath.Join(roots.backup, year, month),
+			roots.original,
+			roots.backup,
+		) {
+			if path, found := tryDir(dir); found {
+				return path, nil
+			}
+		}
 	} else {
-		// 没有前缀，在监听路径下查找
-		watchDir := config.GlobalConfig.GetPdfWatchDir(country)
-		if watchDir == "" {
-			return "", fmt.Errorf("国家 %s 的税金单监听目录未配置", country)
+		if path, found := tryDir(roots.original); found {
+			return path, nil
 		}
-
-		if !util.IsExists(watchDir) {
-			return "", fmt.Errorf("国家 %s 的税金单监听目录不存在", country)
+		if path, err := s.findBackedUpCopyByOriginalName(roots.backup, filename); err == nil {
+			log.Debugf("税金单按原始名在备份树中定位: file=%s path=%s", filename, path)
+			return path, nil
 		}
-
-		return s.findFileInDirectory(filename, watchDir)
+		if path, found := tryDir(roots.backup); found {
+			return path, nil
+		}
 	}
+
+	return "", fmt.Errorf("未找到税金单文件 %s（已查找: %s）", filename, strings.Join(searched, "; "))
+}
+
+func (s *TaxBillService) resolveTaxBillLookupRoots(country string) (taxBillLookupRoots, error) {
+	roots := taxBillLookupRoots{
+		original: strings.TrimSpace(config.GlobalConfig.GetPdfWatchDir(country)),
+		backup:   strings.TrimSpace(config.GlobalConfig.GetTaxBillDir(country)),
+	}
+	storage := strings.TrimSpace(config.GlobalConfig.GetStorageTaxBillDir(country))
+
+	if roots.backup == "" {
+		roots.backup = storage
+	}
+	if roots.original == "" {
+		roots.original = storage
+	}
+	if roots.original == "" && roots.backup == "" {
+		return roots, fmt.Errorf("国家 %s 的税金单目录未配置（watch-dir / backup-dir / storage.tax-bill）", country)
+	}
+	return roots, nil
+}
+
+// findBackedUpCopyByOriginalName 在 backup/yyyy/mm/ 下查找 yyyyMM_原始文件名（监听备份后 watch 可能已无原文件）。
+func (s *TaxBillService) findBackedUpCopyByOriginalName(backupDir, originalName string) (string, error) {
+	if backupDir == "" {
+		return "", fmt.Errorf("backup dir empty")
+	}
+	pattern := filepath.Join(backupDir, "20*", "*", "*_"+originalName)
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return "", err
+	}
+	var candidates []string
+	suffix := "_" + originalName
+	for _, m := range matches {
+		base := filepath.Base(m)
+		if strings.EqualFold(base, originalName) {
+			candidates = append(candidates, m)
+			continue
+		}
+		if strings.HasSuffix(strings.ToLower(base), strings.ToLower(suffix)) {
+			candidates = append(candidates, m)
+		}
+	}
+	if len(candidates) == 0 {
+		return "", fmt.Errorf("no backed-up copy for %s", originalName)
+	}
+	sort.Strings(candidates)
+	return candidates[len(candidates)-1], nil
+}
+
+func uniqueNonEmptyDirs(dirs ...string) []string {
+	seen := make(map[string]struct{}, len(dirs))
+	out := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		d = strings.TrimSpace(d)
+		if d == "" {
+			continue
+		}
+		if _, ok := seen[d]; ok {
+			continue
+		}
+		seen[d] = struct{}{}
+		out = append(out, d)
+	}
+	return out
 }
 
 // findFileInDirectory 在指定目录中查找文件
