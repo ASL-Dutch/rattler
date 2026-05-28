@@ -78,17 +78,17 @@ func (s *TaxBillService) MoveTaxBillToBackup(filePath, country string) (string, 
 	return fileName, nil
 }
 
-// taxBillLookupRoots 税金单 Web 访问用的目录根：original 为监听/历史平铺目录，backup 为按 yyyy/mm 归档的备份根。
+// taxBillLookupRoots 税金单 Web 访问目录（storage.tax-bill-original / tax-bill-backup，不引用 watchers 监听路径）。
 type taxBillLookupRoots struct {
 	original string
 	backup   string
 }
 
-// FindTaxBillFile 按文件名解析税金单物理路径，兼容监听备份前后两种命名方式。
+// FindTaxBillFile 按文件名解析税金单物理路径（仅使用 storage.tax-bill-original / tax-bill-backup）。
 //
 // 规则：
-//   - 文件名含 yyyyMM_ 前缀（备份命名）：优先 backupDir/yyyy/mm/；其次 original 平铺（重放监听场景）。
-//   - 无前缀（原始命名）：优先 original 监听目录（上线监听备份前的历史文件）；其次在 backup 树中匹配 *_原始名。
+//   - 含 yyyyMM_ 前缀：优先 backup/yyyy/mm/ 下全名；再在 original 下去前缀查找（未备份历史文件）。
+//   - 无前缀：优先 original；再在 backup 树中匹配 yyyyMM_原始名。
 func (s *TaxBillService) FindTaxBillFile(filename, country string) (string, error) {
 	if filename == "" || country == "" {
 		return "", fmt.Errorf("文件名和国家代码不能为空")
@@ -101,38 +101,45 @@ func (s *TaxBillService) FindTaxBillFile(filename, country string) (string, erro
 	}
 
 	var searched []string
-	tryDir := func(dir string) (string, bool) {
-		if dir == "" {
+	tryLookup := func(lookupName, dir string) (string, bool) {
+		if dir == "" || lookupName == "" {
 			return "", false
 		}
-		searched = append(searched, dir)
-		path, err := s.findFileInDirectory(filename, dir)
+		label := dir + " as " + lookupName
+		searched = append(searched, label)
+		path, err := s.findFileInDirectory(lookupName, dir)
 		if err != nil {
 			return "", false
 		}
-		log.Debugf("税金单定位成功: file=%s path=%s dir=%s", filename, path, dir)
+		log.Debugf("税金单定位成功: request=%s lookup=%s path=%s", filename, lookupName, path)
 		return path, true
 	}
 
 	if year, month, ok := util.ParseTaxBillBackupPrefix(filename); ok {
-		for _, dir := range uniqueNonEmptyDirs(
-			filepath.Join(roots.backup, year, month),
-			roots.original,
-			roots.backup,
-		) {
-			if path, found := tryDir(dir); found {
+		unprefixed := util.TaxBillNameWithoutBackupPrefix(filename)
+		lookups := []struct {
+			name string
+			dir  string
+		}{
+			{filename, filepath.Join(roots.backup, year, month)},
+			{unprefixed, roots.original},
+			{filename, roots.original},
+			{filename, roots.backup},
+		}
+		for _, item := range lookups {
+			if path, found := tryLookup(item.name, item.dir); found {
 				return path, nil
 			}
 		}
 	} else {
-		if path, found := tryDir(roots.original); found {
+		if path, found := tryLookup(filename, roots.original); found {
 			return path, nil
 		}
 		if path, err := s.findBackedUpCopyByOriginalName(roots.backup, filename); err == nil {
 			log.Debugf("税金单按原始名在备份树中定位: file=%s path=%s", filename, path)
 			return path, nil
 		}
-		if path, found := tryDir(roots.backup); found {
+		if path, found := tryLookup(filename, roots.backup); found {
 			return path, nil
 		}
 	}
@@ -142,19 +149,11 @@ func (s *TaxBillService) FindTaxBillFile(filename, country string) (string, erro
 
 func (s *TaxBillService) resolveTaxBillLookupRoots(country string) (taxBillLookupRoots, error) {
 	roots := taxBillLookupRoots{
-		original: strings.TrimSpace(config.GlobalConfig.GetPdfWatchDir(country)),
-		backup:   strings.TrimSpace(config.GlobalConfig.GetTaxBillDir(country)),
-	}
-	storage := strings.TrimSpace(config.GlobalConfig.GetStorageTaxBillDir(country))
-
-	if roots.backup == "" {
-		roots.backup = storage
-	}
-	if roots.original == "" {
-		roots.original = storage
+		original: strings.TrimSpace(config.GlobalConfig.GetStorageTaxBillOriginalDir(country)),
+		backup:   strings.TrimSpace(config.GlobalConfig.GetStorageTaxBillBackupDir(country)),
 	}
 	if roots.original == "" && roots.backup == "" {
-		return roots, fmt.Errorf("国家 %s 的税金单目录未配置（watch-dir / backup-dir / storage.tax-bill）", country)
+		return roots, fmt.Errorf("国家 %s 的税金单存储目录未配置（storage.tax-bill-original / storage.tax-bill-backup）", country)
 	}
 	return roots, nil
 }

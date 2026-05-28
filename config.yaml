@@ -63,10 +63,12 @@ watchers:
 # 存储目录配置 - 用于Web服务访问文件
 storage:
   nl:
-    tax-bill: out/backup/pdf/nl # 荷兰税金单存储目录
+    tax-bill-original: out/watch/pdf/nl # 荷兰税金单原目录（历史平铺，Web 无前缀下载）
+    tax-bill-backup: out/backup/pdf/nl # 荷兰税金单备份根目录（yyyy/mm/，Web 带 yyyyMM_ 前缀下载）
     export: out/backup/export/nl # 荷兰导出文件存储目录
   be:
-    tax-bill: out/backup/pdf/be # 比利时税金单存储目录
+    tax-bill-original: out/watch/pdf/be # 比利时税金单原目录
+    tax-bill-backup: out/backup/pdf/be # 比利时税金单备份根目录
     export: out/backup/export/be # 比利时导出文件存储目录
 
 # 导入XML配置

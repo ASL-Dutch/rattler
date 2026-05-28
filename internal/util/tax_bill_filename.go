@@ -36,6 +36,16 @@ func ParseTaxBillBackupPrefix(filePathOrName string) (year, month string, ok boo
 	return m[1], m[2], true
 }
 
+// TaxBillNameWithoutBackupPrefix 去掉 basename 上的 yyyyMM_ 备份前缀，得到原始文件名。
+func TaxBillNameWithoutBackupPrefix(filePathOrName string) string {
+	base := filepath.Base(strings.TrimSpace(filePathOrName))
+	m := taxBillBackupPrefixRe.FindStringSubmatch(base)
+	if len(m) != 4 {
+		return NormalizeTaxBillFileName(filePathOrName)
+	}
+	return NormalizeTaxBillFileName(m[3])
+}
+
 // NormalizeTaxBillFileName 规范为 basename，并统一 pdf 扩展名为小写 .pdf。
 func NormalizeTaxBillFileName(filePathOrName string) string {
 	base := filepath.Base(strings.TrimSpace(filePathOrName))

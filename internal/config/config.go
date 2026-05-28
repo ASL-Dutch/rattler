@@ -62,11 +62,28 @@ type LogConfig struct {
 
 // CountryDirs contains directory configuration for a specific country
 type CountryDirs struct {
-	// TaxBill is the directory for tax bill files
+	// TaxBillOriginal is the flat directory for historical / pre-backup tax bill PDFs (Web 下载原路径).
+	TaxBillOriginal string `mapstructure:"tax-bill-original"`
+
+	// TaxBillBackup is the root of dated tax bill backups (Web 下载备份路径，结构 backup/yyyy/mm/).
+	TaxBillBackup string `mapstructure:"tax-bill-backup"`
+
+	// TaxBill is deprecated; use tax-bill-backup when only this field is set (兼容旧配置).
 	TaxBill string `mapstructure:"tax-bill"`
 
 	// Export is the directory for export backup files
 	Export string `mapstructure:"export"`
+}
+
+func (d CountryDirs) resolvedTaxBillOriginal() string {
+	return strings.TrimSpace(d.TaxBillOriginal)
+}
+
+func (d CountryDirs) resolvedTaxBillBackup() string {
+	if b := strings.TrimSpace(d.TaxBillBackup); b != "" {
+		return b
+	}
+	return strings.TrimSpace(d.TaxBill)
 }
 
 // ServiceDirs contains service directories for different countries
@@ -524,17 +541,35 @@ func (c *AppConfig) GetTaxBillDir(country string) string {
 	}
 }
 
-// GetStorageTaxBillDir returns the storage tax bill directory for a specific country
-func (c *AppConfig) GetStorageTaxBillDir(country string) string {
+// GetStorageTaxBillOriginalDir returns the flat original tax bill directory for Web download.
+func (c *AppConfig) GetStorageTaxBillOriginalDir(country string) string {
 	country = normalizeCountry(country)
-
-	if country == "NL" {
-		return c.Storage.NL.TaxBill
-	} else if country == "BE" {
-		return c.Storage.BE.TaxBill
-	} else {
+	switch country {
+	case "NL":
+		return c.Storage.NL.resolvedTaxBillOriginal()
+	case "BE":
+		return c.Storage.BE.resolvedTaxBillOriginal()
+	default:
 		return ""
 	}
+}
+
+// GetStorageTaxBillBackupDir returns the dated backup root for Web download.
+func (c *AppConfig) GetStorageTaxBillBackupDir(country string) string {
+	country = normalizeCountry(country)
+	switch country {
+	case "NL":
+		return c.Storage.NL.resolvedTaxBillBackup()
+	case "BE":
+		return c.Storage.BE.resolvedTaxBillBackup()
+	default:
+		return ""
+	}
+}
+
+// GetStorageTaxBillDir returns the backup tax bill directory (兼容旧调用，等同 GetStorageTaxBillBackupDir).
+func (c *AppConfig) GetStorageTaxBillDir(country string) string {
+	return c.GetStorageTaxBillBackupDir(country)
 }
 
 // GetStorageExportDir returns the storage export directory for a specific country

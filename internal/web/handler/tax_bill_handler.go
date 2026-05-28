@@ -24,7 +24,7 @@ func NewTaxBillHandler() *TaxBillHandler {
 
 // DownloadTaxBill 下载税金单文件
 // @Summary      下载税金单文件
-// @Description  下载指定国家的税金单文件。文件名含 yyyyMM_ 前缀时从备份目录 yyyy/mm 查找；无前缀时优先从监听目录（历史文件）查找，并兼容备份树中的 yyyyMM_ 副本。
+// @Description  下载指定国家的税金单文件。路径来自 storage.tax-bill-original / tax-bill-backup。含 yyyyMM_ 前缀时优先 backup/yyyy/mm，再在 original 下去前缀查找；无前缀时优先 original，并兼容 backup 树中的 yyyyMM_ 副本。
 // @Tags         tax-bill
 // @Accept       json
 // @Produce      octet-stream
