@@ -1,6 +1,7 @@
 package component
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,9 @@ import (
 
 	log "github.com/sirupsen/logrus"
 )
+
+// ErrFileSkipped 表示 Handler 有意跳过业务处理（非失败）。
+var ErrFileSkipped = errors.New("file skipped by handler")
 
 // FileEvent 文件事件消息结构
 type FileEvent struct {
@@ -129,7 +133,11 @@ func (fp *FileProcessor) processOne(event FileEvent) {
 
 	if fp.config.Handler != nil {
 		if err := fp.config.Handler(event.FilePath, event.AdditionalData); err != nil {
-			log.Errorf("处理文件失败 [jobNo=%s]: %s, err=%v", jobNo, event.FilePath, err)
+			if errors.Is(err, ErrFileSkipped) {
+				log.Infof("文件已跳过业务处理 [jobNo=%s]: %s", jobNo, filepath.Base(event.FilePath))
+			} else {
+				log.Errorf("处理文件失败 [jobNo=%s]: %s, err=%v", jobNo, event.FilePath, err)
+			}
 		} else {
 			log.Infof("处理文件完成 [jobNo=%s]: %s", jobNo, filepath.Base(event.FilePath))
 		}

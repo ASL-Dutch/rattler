@@ -35,6 +35,12 @@ func handleExportXmlCreateEvent(filename string, country string) error {
 
 // 处理税单创建事件
 func handleTaxBillCreateEvent(filename string, country string) error {
+	if !util.IsProcessableTaxBillFileName(filename) {
+		log.Infof("税金单文件不在处理范围（文件名须包含 %s），仅记录不处理: country=%s, file=%s",
+			util.TaxBillProcessableMarker, country, filename)
+		return component.ErrFileSkipped
+	}
+
 	log.Infof("处理 %s 税单文件: %s", country, filename)
 
 	if !util.IsExists(filename) {

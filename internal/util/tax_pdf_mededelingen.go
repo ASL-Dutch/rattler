@@ -96,7 +96,11 @@ var (
 
 	reBankrekeningNL = regexp.MustCompile(`(?i)NL[0-9]{2}[A-Z]{4}[0-9]{10}`)
 	reReferentie     = regexp.MustCompile(`(?i)Referentie:\s*([0-9][0-9\s]{8,40})`)
-	reBedrag         = regexp.MustCompile(`(?i)Bedrag:\s*([0-9]{1,3}(?:[.,][0-9]{2})|[0-9]{1,3}(?:\.[0-9]{3})*(?:[.,][0-9]{2}))`)
+	// 荷兰税单金额：千分位用点、小数用逗号（如 1.102,84）。按从具体到宽松依次尝试，
+	// 避免把 1.102,84 误匹配为 1.10（旧版 [.,] 会把千分位点当成小数点）。
+	reBedragThousands = regexp.MustCompile(`(?i)Bedrag:\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})`)
+	reBedragComma     = regexp.MustCompile(`(?i)Bedrag:\s*([0-9]+,[0-9]{2})`)
+	reBedragDot       = regexp.MustCompile(`(?i)Bedrag:\s*([0-9]+\.[0-9]{2})(?:\D|$)`)
 )
 
 // ParseTaxPdfMededelingen 从税金单 PDF 文件路径解析底部 Mededelingen 区域。
@@ -143,7 +147,7 @@ func ParseTaxPdfMededelingen(pdfPath string) (*TaxPdfMededelingen, error) {
 	if m := reReferentie.FindStringSubmatch(block); len(m) > 1 {
 		out.Reference = strings.ReplaceAll(strings.TrimSpace(m[1]), " ", "")
 	}
-	applySubmatch(reBedrag, block, &out.AmountRaw)
+	out.AmountRaw = extractBedragRaw(block)
 	if std, err := EuropeanAmountToStandard(out.AmountRaw); err == nil {
 		out.AmountStandard = std
 	}
@@ -339,6 +343,16 @@ func applySubmatch(re *regexp.Regexp, s string, dest *string) {
 	if m := re.FindStringSubmatch(s); len(m) > 1 {
 		*dest = strings.TrimSpace(m[1])
 	}
+}
+
+// extractBedragRaw 从 Mededelingen 文本块提取 Bedrag 后的欧洲/标准金额原文。
+func extractBedragRaw(block string) string {
+	for _, re := range []*regexp.Regexp{reBedragThousands, reBedragComma, reBedragDot} {
+		if m := re.FindStringSubmatch(block); len(m) > 1 {
+			return strings.TrimSpace(m[1])
+		}
+	}
+	return ""
 }
 
 // valueAfterLabelUntil 在 block 中取 label 之后的值，直到任一 stop 子串（大小写不敏感）出现。

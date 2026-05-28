@@ -54,12 +54,14 @@ func SendTaxBillInfoToExportMQ(pdfPath, declareCountry string) error {
 		return fmt.Errorf("serialize tax-bill info failed: %w", err)
 	}
 
-	publishMessageToMQ(bf.String(), declareCountry)
+	message := strings.TrimSpace(bf.String())
+	publishMessageToMQ(message, declareCountry)
 	if info.ParseSuccess {
-		log.Infof("税金单信息已发布到Export MQ: file=%s, jobNo=%s, country=%s", info.FileName, info.ResolvedJobNo(), declareCountry)
+		log.Infof("税金单信息已发布到Export MQ: file=%s, jobNo=%s, country=%s, message=%s",
+			info.FileName, info.ResolvedJobNo(), declareCountry, message)
 	} else {
-		log.Warnf("税金单解析不完整仍发布MQ: file=%s, jobNo=%s, country=%s, reason=%s",
-			info.FileName, info.ResolvedJobNo(), declareCountry, info.FailureReason)
+		log.Warnf("税金单解析不完整仍发布MQ: file=%s, jobNo=%s, country=%s, reason=%s, message=%s",
+			info.FileName, info.ResolvedJobNo(), declareCountry, info.FailureReason, message)
 	}
 	return nil
 }
