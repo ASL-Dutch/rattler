@@ -204,17 +204,54 @@ sequenceDiagram
 - 流程见 [2.3.2 税金单（PDF）时序](#232-税金单pdf)：监听层就绪 →（可选）解析发 MQ → 异步归档。
 - 通过 `file-mover` 队列移动到备份目录 `backup-dir/YYYY/MM/`，文件名可带 `YYYYMM_` 前缀。
 - 可配置 `keep-original: true` 在监听目录保留原文件（即复制一份到备份）。
+- **解析范围**：仅文件名包含 `DI-18` 的 PDF 会解析 `Mededelingen` 并发布 MQ；其余 PDF 仍执行备份，不解析内容。
 
 ### 3.4 HTTP 文件下载 API
 
 | 功能             | 方法     | 路径                                         | 说明                                                                    |
 | ---------------- | -------- | -------------------------------------------- | ----------------------------------------------------------------------- |
-| 税金单 PDF       | GET      | `/download/pdf/:origin/:target?dc=NL\|BE`    | 按申报国 dc 从存储目录取 PDF，`origin`/`target` 不含后缀时自动补 `.pdf` |
+| 税金单 PDF       | GET      | `/download/pdf/:origin/:target?dc=NL\|BE`    | 与「税金单（新）」接口共用同一套查找逻辑（见 [3.4.1](#341-税金单-pdf-下载查找规则)） |
 | Export XML       | GET      | `/download/xml/:dc/:filename?download=1`     | 按 dc 与文件名（含后缀）查找 Export 文件；`download=1` 时以附件下载     |
-| 税金单（新）     | GET      | `/api/tax-bills/:country/download/:filename` | 按国家与文件名下载，支持按日期目录查找                                  |
+| 税金单（新）     | GET      | `/api/tax-bills/:country/download/:filename` | 按国家与文件名下载；查找规则见 [3.4.1](#341-税金单-pdf-下载查找规则)    |
 | 文件搜索         | POST     | `/search/file`                               | 按条件搜索文件（见 Swagger）                                            |
 | Export 列表/重发 | GET/POST | `/export/list/:dc`、`/export/remover/:dc`    | 列表与重发（见 Swagger）                                                |
 | Swagger          | GET      | `/swagger/*`                                 | API 文档                                                                |
+
+#### 3.4.1 税金单 PDF 下载查找规则
+
+两个税金单下载接口均调用 `TaxBillService.FindTaxBillFile`，**仅使用** `storage.*.tax-bill-original` 与 `storage.*.tax-bill-backup`，**不读取** `watchers.pdf.*.watch-dir`（监听目录与 Web 下载目录解耦，部署时需分别配置）。
+
+| 配置项 | 含义 | 典型路径 |
+| ------ | ---- | -------- |
+| `storage.{nl\|be}.tax-bill-original` | 原目录：历史/平铺 PDF，上线监听备份前的文件 | 常与 `watch-dir` 相同 |
+| `storage.{nl\|be}.tax-bill-backup` | 备份根目录：归档结构为 `{backup}/YYYY/MM/` | 与 `watchers.pdf.*.backup-dir` 一致 |
+
+兼容：若未配置 `tax-bill-backup`，可回退使用旧字段 `storage.*.tax-bill`（视为备份根目录）。
+
+**文件名约定**
+
+- **无前缀**（原始名）：如 `DI-18-AI-2026-00441622.pdf`
+- **带 `yyyyMM_` 前缀**（备份名）：如 `202605_DI-18-AI-2026-00441622.pdf`（与监听归档命名一致）
+
+**查找顺序**
+
+| 请求文件名 | 步骤 | 目录 | 查找用的文件名 | 说明 |
+| ---------- | ---- | ---- | -------------- | ---- |
+| 含 `yyyyMM_` | 1 | `tax-bill-backup/YYYY/MM/` | 请求全名 | 按前缀解析年月，在对应归档目录查找 |
+| 含 `yyyyMM_` | 2 | `tax-bill-original` | **去掉 `yyyyMM_` 前缀**后的原名 | 未备份的历史文件（请求带前缀但磁盘上仍为原名） |
+| 含 `yyyyMM_` | 3 | `tax-bill-original` | 请求全名 | 重放监听等场景 |
+| 含 `yyyyMM_` | 4 | `tax-bill-backup`（根） | 请求全名 | 兜底 |
+| 无前缀 | 1 | `tax-bill-original` | 请求全名 | 精确匹配，同目录下不区分 `.pdf` 大小写 |
+| 无前缀 | 2 | `tax-bill-backup/20*/**/` | `*_请求全名` | 在备份树中匹配 `yyyyMM_` + 原名；多条时取字典序最后一条 |
+| 无前缀 | 3 | `tax-bill-backup`（根） | 请求全名 | 平铺兜底 |
+
+**日志**
+
+每次下载会在日志中记录 `originalDir`、`backupDir` 及每一步尝试结果（目录、查找名、命中/未命中），便于排查配置与文件位置。成功为 `Info`，失败为 `Warn`。
+
+**部署注意**
+
+从旧版单字段 `storage.*.tax-bill` 升级时，请拆分为 `tax-bill-original` 与 `tax-bill-backup`；现场 `config-test.yaml`、`config-win-*.yaml` 等需与 `config.yaml` 示例同步修改。
 
 ---
 
@@ -293,14 +330,18 @@ sequenceDiagram
 
 ### 4.5 存储目录（storage）
 
-供 HTTP 下载使用的路径，可与备份目录一致或不同。
+供 HTTP 下载使用的路径；税金单 PDF 需配置原目录与备份目录（见 [3.4.1](#341-税金单-pdf-下载查找规则)）。
 
-| 参数                  | 类型   | 说明                                   |
-| --------------------- | ------ | -------------------------------------- |
-| `storage.nl.tax-bill` | string | 荷兰税金单对外提供下载的根目录         |
-| `storage.nl.export`   | string | 荷兰 Export XML 对外提供下载的根目录   |
-| `storage.be.tax-bill` | string | 比利时税金单对外提供下载的根目录       |
-| `storage.be.export`   | string | 比利时 Export XML 对外提供下载的根目录 |
+| 参数                            | 类型   | 说明                                                         |
+| ------------------------------- | ------ | ------------------------------------------------------------ |
+| `storage.nl.tax-bill-original`  | string | 荷兰税金单原目录（平铺，无前缀文件名下载）                     |
+| `storage.nl.tax-bill-backup`    | string | 荷兰税金单备份根目录（`YYYY/MM/`，带 `yyyyMM_` 前缀下载）    |
+| `storage.nl.tax-bill`           | string | （已废弃）未配置 `tax-bill-backup` 时作为备份根目录兼容回退 |
+| `storage.nl.export`             | string | 荷兰 Export XML 对外提供下载的根目录                         |
+| `storage.be.tax-bill-original`  | string | 比利时税金单原目录                                           |
+| `storage.be.tax-bill-backup`    | string | 比利时税金单备份根目录                                       |
+| `storage.be.tax-bill`           | string | （已废弃）兼容回退                                           |
+| `storage.be.export`             | string | 比利时 Export XML 对外提供下载的根目录                       |
 
 ### 4.6 导入（import）
 
@@ -373,10 +414,10 @@ Rattler 自身提供 HTTP API 下载税金单；若需要将**税金单目录**�
 
 Caddy 需**同时支持**两种访问方式（ASL 等场景下存在大量历史税金文件在原路径，无法一次性迁到按年月路径）：
 
-- **按日期**：URL `/202505_xxx.pdf` → 在 `backup-dir/2025/05/202505_xxx.pdf` 提供；
-- **不按日期**：URL `/任意文件名.pdf` → 在**原路径**根目录（与 config 中 `storage.*.tax-bill` 一致）直接提供。
+- **按日期**：URL `/202505_xxx.pdf` → 在 `tax-bill-backup/2025/05/202505_xxx.pdf` 提供；
+- **不按日期**：URL `/任意文件名.pdf` → 在**原路径**根目录（`storage.*.tax-bill-original`）直接提供。
 
-配置时「按日期」根对应 backup-dir，「不按日期」根对应原路径（`storage.*.tax-bill` / watch-dir）；`keep-original: true` 时新文件也保留在原路径，便于统一从原路径访问。示例与 Windows 下 Caddy 安装、NSSM 部署及 Caddyfile 双根配置见 **[DEPLOY.md](DEPLOY.md)**。
+配置时「按日期」根对应 `storage.*.tax-bill-backup`（与 `watchers.pdf.*.backup-dir` 一致），「不按日期」根对应 `storage.*.tax-bill-original`；`keep-original: true` 时新文件也保留在原路径，便于统一从原路径访问。通过 Rattler HTTP API 下载时，查找逻辑见 [3.4.1](#341-税金单-pdf-下载查找规则)。示例与 Windows 下 Caddy 安装、NSSM 部署及 Caddyfile 双根配置见 **[DEPLOY.md](DEPLOY.md)**。
 
 ---
 
